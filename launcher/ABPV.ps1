@@ -76,16 +76,33 @@ $miExit = $menu.Items.Add('Выйти и остановить серверы')
 $tray.ContextMenuStrip = $menu
 
 $script:Ready = $false
+$script:Started = $false
 $script:Waited = 0
+
+# сторож: если сервер упал или его закрыл кто-то другой (например, чужой процесс, на который мы опирались), поднимаем заново
+$watch = New-Object System.Windows.Forms.Timer
+$watch.Interval = 5000
+$watch.Add_Tick({
+    if (-not $script:Ready) { return }
+    if (-not (Test-Url $ApiUrl) -or -not (Test-Url $WebUrl)) {
+        $script:Ready = $false; $script:Waited = 0
+        $tray.Text = "${Title}: поднимаю серверы"
+        $tray.ShowBalloonTip(4000, $Title, 'Сервер перестал отвечать, запускаю заново. Окно обновится само.', 'Warning')
+        Start-Servers
+        $timer.Start()
+    }
+})
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1000
 $timer.Add_Tick({
     $script:Waited++
     if ((Test-Url $ApiUrl) -and (Test-Url $WebUrl)) {
         $timer.Stop()
-        $script:Ready = $true
+        $firstStart = -not $script:Started
+        $script:Ready = $true; $script:Started = $true
         $tray.Text = "${Title}: работает"
-        Open-AppWindow
+        if ($firstStart) { Open-AppWindow }  # после перезапуска окно переподключится само
+        $watch.Start()
     } elseif ($script:Waited -ge 90) {
         $timer.Stop()
         $tray.Text = "${Title}: не запустился"
@@ -106,7 +123,7 @@ $miRestart.Add_Click({
     $timer.Start()
 })
 $miExit.Add_Click({
-    $timer.Stop()
+    $timer.Stop(); $watch.Stop()
     Stop-Servers
     $tray.Visible = $false
     $tray.Dispose()
