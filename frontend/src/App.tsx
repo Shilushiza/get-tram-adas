@@ -10,17 +10,30 @@ import PhoneQR from './components/PhoneQR'
 import { openEpisode } from './nav'
 
 function Logo() {
-  // силуэт трамвая с пантографом у контактного провода
+  // «Витязь-М» в петербургском синем: три секции, наклонный лоб с чёрной маской и табло,
+  // однорычажный пантограф у контактного провода. Геометрия совпадает с launcher/make_icon.py.
+  const glass = '#0B1730'
   return (
     <svg className="logo" viewBox="0 0 64 32" aria-hidden>
-      <path d="M2 4h60" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M30 13 36 8 31 4.6" stroke="currentColor" strokeWidth="1.6" fill="none" />
-      <rect x="6" y="13" width="52" height="12" rx="3" fill="#D55E00" />
-      <rect x="9" y="15.5" width="40" height="4" rx="1" fill="#1C232D" />
-      <path d="M52 15.5h4.5l-1 4H52z" fill="#1C232D" />
-      <circle cx="15" cy="27" r="2.2" fill="currentColor" /><circle cx="22" cy="27" r="2.2" fill="currentColor" />
-      <circle cx="44" cy="27" r="2.2" fill="currentColor" /><circle cx="51" cy="27" r="2.2" fill="currentColor" />
-      <path d="M2 30h60" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M1 3.5h62" stroke="currentColor" strokeWidth="1" />
+      <path d="M44 11.4 48.6 7.6 43.6 4" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinejoin="round" />
+      <path d="M40.6 4h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M42.5 11.5h4" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M3 24.5V14q0-2.5 2.5-2.5H51c4 0 6.6 1.1 8.6 4.1l2.6 4.8q.6 1.2.4 2.4l-.3 1.7z" fill="#2F6FE4" />
+      <path d="M3 21.6h59.75l-.15 1.2-.3 1.7H3z" fill="#DDE7F5" />
+      <path d="M3 20.6h50.5" stroke="#fff" strokeWidth=".7" />
+      <rect x="5" y="14" width="14" height="5.2" rx=".8" fill={glass} />
+      <rect x="23.4" y="14" width="12.8" height="5.2" rx=".8" fill={glass} />
+      <rect x="40.4" y="14" width="11.4" height="5.2" rx=".8" fill={glass} />
+      <path d="M9.6 13.2h3v8.4h-3zM28.2 13.2h3v8.4h-3zM44.4 13.2h3v8.4h-3z" fill="#8FB6F2" />
+      <path d="M11.1 14v7M29.7 14v7M45.9 14v7" stroke={glass} strokeWidth=".5" />
+      <rect x="20.6" y="11.5" width="1.4" height="13" fill={glass} />
+      <rect x="37.6" y="11.5" width="1.4" height="13" fill={glass} />
+      <path d="M52.4 12.4h1.6c2.6 0 4.2 1 5.4 3l2.6 4.9h-8.2q-1.4 0-1.4-1.4z" fill={glass} />
+      <rect x="53.4" y="13.2" width="4" height="1.3" rx=".3" fill="#FFB020" />
+      <circle cx="61.2" cy="22.6" r=".75" fill="#fff" />
+      <path d="M6 24.5h8v1.8H6zM26 24.5h7v1.8h-7zM50 24.5h8v1.8h-8z" fill={glass} />
+      <path d="M1 27.5h62" stroke="currentColor" strokeWidth="1" />
     </svg>
   )
 }

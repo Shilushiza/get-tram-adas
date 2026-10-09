@@ -75,13 +75,33 @@ export const api = {
   },
 }
 
+/* Палитра: одно место правды для цветов, которые рисуются кодом (ECharts, uPlot, canvas, 3D).
+   Значения совпадают с токенами в index.css (:root). Категории событий только здесь (KIND_COLOR). */
+export const PAL = {
+  ink: '#13203a', ink2: '#4b5a70', ink3: '#6b778c',          // текст: основной, вторичный, подписи
+  line: '#9fb0c6', line2: '#dbe3ee', panel: '#ffffff',         // рамки, сетка, поверхность
+  brand: '#1d4fc4', inset: '#0e2240', onInset: '#b9c6da',      // бренд и «ночная Нева»
+  muted: '#a8bcd4',                                            // контекстные столбцы (не категория)
+  alarm: '#0B2E7A',                                            // важное и критичное
+  amber: '#ffb020', amberLt: '#ffd166', amberInk: '#8a5a00',  // единственный тёплый акцент: «внимание» на тёмной сцене
+  ok: '#0b7a5a', okDark: '#3df2a0',                            // итог «остановился до объекта»
+}
 export const KIND_COLOR: Record<Kind, string> = {
-  danger: '#D55E00', traffic_light: '#B07A00', hard_brake: '#B4447F', skid: '#009E73', speed_limit: '#8A939F',
+  danger: '#0B2E7A', traffic_light: '#2F7FE0', hard_brake: '#6A3FD0', skid: '#0FA3B8', speed_limit: '#A8BCD4',
+}
+/** Те же категории на тёмном фоне (2D-сцена, ролик): светлые версии, различимы по светлоте. */
+export const KIND_GLOW: Record<Kind, string> = {
+  danger: '#e3ebff', traffic_light: '#56b0ff', hard_brake: '#c4a8ff', skid: '#5fe3ef', speed_limit: '#c9d6ea',
+}
+/** Цвет с прозрачностью из hex: полосы на графиках и легенды берут категорию отсюда, а не копию rgba. */
+export const alpha = (hex: string, a: number) => {
+  const h = hex.replace('#', '')
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`
 }
 export const OBJ_COLOR: Record<string, string> = {
-  Ped: '#D55E00', Vehicle: '#0072B2', Tram: '#B4447F', TrafficLightSignal: '#B07A00', Obstacle: '#556170',
+  Ped: KIND_COLOR.danger, Vehicle: KIND_COLOR.skid, Tram: KIND_COLOR.hard_brake, TrafficLightSignal: KIND_COLOR.traffic_light, Obstacle: PAL.ink3,
 }
-export const CTRL_COLOR: Record<string, string> = { driver: '#17202B', auto: '#0072B2', und: '#C5CCD4' }
+export const CTRL_COLOR: Record<string, string> = { driver: PAL.ink, auto: PAL.brand, und: '#c9d5e3' }
 
 export const num = (s: Series | null, key: string, i: number): number | null => {
   const v = s?.[key]?.[i]

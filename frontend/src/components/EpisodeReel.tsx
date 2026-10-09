@@ -4,8 +4,8 @@ import { useStore } from '../store'
 import { place, useT, type Key } from '../i18n'
 import Replay2D from './Replay2D'
 
-/** Кадр ролика 1280×720: реконструкция + состояние + графики + субтитр из фактов.
- *  Всё из окна этого эпизода, поэтому ролик у каждого эпизода свой. */
+/** Кнопка «Скачать ролик эпизода». На время записи невидимо собирается кадр 1280×720:
+ *  2D-реконструкция + состояние системы + графики + субтитр из фактов. Всё из окна этого эпизода. */
 const W = 1280, H = 720
 const SCENE = { x: 0, y: 44, w: 820, h: 470 }
 const SIDE = { x: 836, y: 56, w: 428 }
@@ -14,12 +14,12 @@ const MUTED = '#8A97A3', BG = '#1E2833', PANEL = '#26323E'
 const FONT = 'Golos Text, sans-serif'
 
 const LAMPS: [string, Key, string][] = [
-  ['danger_real', 'lampDanger', '#D55E00'], ['tl_real', 'lampTl', '#B07A00'], ['sl_real', 'lampSl', '#8A939F'],
-  ['brake_mech', 'lampMech', '#5d6a72'], ['brake_rail', 'lampRail', '#B4447F'], ['brake_emergency', 'lampEmerg', '#B4447F'],
-  ['brake_crash', 'lampCrash', '#B4447F'], ['as_is_skid', 'lampSkid', '#009E73'],
+  ['danger_real', 'lampDanger', '#0B2E7A'], ['tl_real', 'lampTl', '#2F7FE0'], ['sl_real', 'lampSl', '#A8BCD4'],
+  ['brake_mech', 'lampMech', '#5d6a72'], ['brake_rail', 'lampRail', '#6A3FD0'], ['brake_emergency', 'lampEmerg', '#6A3FD0'],
+  ['brake_crash', 'lampCrash', '#6A3FD0'], ['as_is_skid', 'lampSkid', '#0FA3B8'],
 ]
 const SENSORS = ['t25Front', 'leftImage', 'tramSlaveVisor', 'ubloxGps', 'minsEth', 'odoFbTram', 'dbwFbTram']
-const BANDS: [string, string][] = [['danger_real', 'rgba(213,94,0,.35)'], ['tl_real', 'rgba(176,122,0,.35)'], ['brake_rail', 'rgba(180,68,127,.4)']]
+const BANDS: [string, string][] = [['danger_real', 'rgba(11,46,122,.35)'], ['tl_real', 'rgba(47,127,224,.35)'], ['brake_rail', 'rgba(106,63,208,.4)']]
 
 function rr(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   g.beginPath(); g.roundRect(x, y, w, h, r); g.fill()
@@ -68,9 +68,8 @@ export default function EpisodeReel() {
   const { t, obj, ctrl, kind, lang } = useT()
   const ref = useRef<HTMLCanvasElement>(null)
   const sceneHost = useRef<HTMLDivElement>(null)
-    const [recording, setRecording] = useState(false)
+  const [recording, setRecording] = useState(false)
 
-  // кадр перерисовывается каждый animation frame: так он всегда берёт свежую картинку сцены
   const paint = useRef<() => void>(() => {})
   paint.current = () => {
     const { win, cursor, selected } = useStore.getState()
@@ -158,17 +157,10 @@ export default function EpisodeReel() {
     strip(g, win, cursor, PLOT.y + 50, 74, [['handle_driver', '#cfd6dc'], ['handle_assistant', '#4FA3E0']], -15, 15,
       lang === 'ru' ? 'Рукоятка: водитель (светлая), ассистент (синяя)' : 'Handle: driver (light), assistant (blue)')
   }
-  useEffect(() => {
-    let raf = 0
-    const loop = () => { paint.current(); raf = requestAnimationFrame(loop) }
-    raf = requestAnimationFrame(loop)
-    return () => cancelAnimationFrame(raf)
-  }, [])
-
   // запись ведёт свой таймер: кадр рисуется и сразу отдаётся в поток, не завися от requestAnimationFrame
   const record = () => {
     const c = ref.current
-    if (!c || !win || !selected) return
+    if (!c || !win || !selected) { setRecording(false); return }
     const stream = c.captureStream(0)
     const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack
     const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find((m) => MediaRecorder.isTypeSupported(m)) ?? ''
@@ -186,7 +178,6 @@ export default function EpisodeReel() {
     const t0 = win.t[0], t1 = win.t[win.t.length - 1], step = 1000 / 30
     let cur = t0
     set({ cursor: cur, playing: false })
-    setRecording(true)
     r.start(250)
     const timer = setInterval(() => {
       cur = Math.min(t1, cur + step * useStore.getState().rate)
@@ -197,17 +188,24 @@ export default function EpisodeReel() {
     }, step)
   }
 
+  // кадр и источник сцены монтируются только на время записи; дадим 2D-сцене отрисоваться и стартуем
+  useEffect(() => {
+    if (!recording) return
+    const id = setTimeout(record, 400)
+    return () => clearTimeout(id)
+  }, [recording]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="reel">
-      <canvas ref={ref} width={W} height={H} className="reel-canvas" aria-label={t('viewReel')} />
-      {/* источник кадра реконструкции, на экран не выводится */}
-      <div ref={sceneHost} className="reel-src" aria-hidden><Replay2D /></div>
-      <div className="reel-bar">
-        <button className="btn primary" disabled={recording || !win} onClick={record}>
-          {recording ? <span className="spinner" /> : null}{recording ? t('reelRecording') : t('reelDownload')}
-        </button>
-        <p className="hint">{t('reelNote')}</p>
-      </div>
-    </div>
+    <>
+      <button className="btn reel-btn" disabled={recording || !win} onClick={() => setRecording(true)} title={t('reelNote')}>
+        {recording ? <span className="spinner dark" /> : null}{recording ? t('reelRecording') : t('reelDownload')}
+      </button>
+      {recording && (
+        <div className="reel-offscreen" aria-hidden>
+          <canvas ref={ref} width={W} height={H} />
+          <div ref={sceneHost} className="reel-src"><Replay2D /></div>
+        </div>
+      )}
+    </>
   )
 }

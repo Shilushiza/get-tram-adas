@@ -55,8 +55,8 @@ export function insights(s: Stats, lang: Lang) {
       : `Most episodes happen at ${s.speed_hist.bins[sp]} km/h${slow ? ', when the tram is nearly stopped or pulling away.' : '.'}`,
     stops: st
       ? ru
-        ? `Лидер: «${st.stop}», ${st.n} срабатываний, из них ${st.crit} важных. Красная часть это важные.`
-        : `Top: “${place(st.stop, lang)}”, ${st.n} episodes, ${st.crit} important. Red marks important ones.`
+        ? `Лидер: «${st.stop}», ${st.n} срабатываний, из них ${st.crit} важных. Тёмно-синяя часть это важные.`
+        : `Top: “${place(st.stop, lang)}”, ${st.n} episodes, ${st.crit} important. Dark blue marks important ones.`
       : '',
     top: ru
       ? `Сверху важные эпизоды, среди них первыми необычные для своего типа. Полоса справа показывает пиковое замедление.`

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { KIND_COLOR, api, dmy, hms, indexAt, ms, num, str, type Fact } from '../api'
+import { KIND_COLOR, dmy, hms, indexAt, ms, num, str, type Fact } from '../api'
 import { useStore, type View } from '../store'
 import { place, useT, type Key } from '../i18n'
 import Tram3D, { PARTS, type PartId } from '../components/Tram3D'
@@ -7,8 +7,9 @@ import Replay2D from '../components/Replay2D'
 import EpisodeReel from '../components/EpisodeReel'
 import Charts from '../components/Charts'
 import { openEpisode } from '../nav'
-import JevVerdicts, { llmError } from '../components/JevVerdicts'
+import AiPanel, { AiBanner } from '../components/AiPanel'
 import SceneBoundary from '../components/SceneBoundary'
+import './episode.css'
 
 const SECTIONS = ['circumstances', 'reaction', 'result', 'limits'] as const
 
@@ -65,9 +66,9 @@ function Player() {
 }
 
 const LAMPS: [string, Key, string][] = [
-  ['danger_real', 'lampDanger', '#D55E00'], ['tl_real', 'lampTl', '#B07A00'], ['sl_real', 'lampSl', '#8A939F'],
-  ['brake_mech', 'lampMech', '#17202B'], ['brake_rail', 'lampRail', '#B4447F'], ['brake_crash', 'lampCrash', '#B4447F'],
-  ['brake_emergency', 'lampEmerg', '#B4447F'], ['as_is_skid', 'lampSkid', '#009E73'],
+  ['danger_real', 'lampDanger', '#0B2E7A'], ['tl_real', 'lampTl', '#2F7FE0'], ['sl_real', 'lampSl', '#A8BCD4'],
+  ['brake_mech', 'lampMech', '#17202B'], ['brake_rail', 'lampRail', '#6A3FD0'], ['brake_crash', 'lampCrash', '#6A3FD0'],
+  ['brake_emergency', 'lampEmerg', '#6A3FD0'], ['as_is_skid', 'lampSkid', '#0FA3B8'],
 ]
 
 function StateStrip() {
@@ -104,14 +105,14 @@ function StateStrip() {
       <div className="lamps">
         {LAMPS.map(([k, label, colr]) => {
           const on = (num(win, k, i) ?? 0) > 0.5
-          return <span key={k} className={`lamp ${on ? 'on' : ''}`} style={on ? { background: colr, borderColor: colr } : undefined}>{t(label)}</span>
+          return <span key={k} className={`lamp ${on ? 'on' : ''}`} style={{ '--c': colr } as React.CSSProperties}>{t(label)}</span>
         })}
       </div>
     </div>
   )
 }
 
-const SEC_COLOR: Record<string, string> = { circumstances: '#8A939F', reaction: '#D55E00', result: '#17202B', limits: '#B07A00' }
+const SEC_COLOR: Record<string, string> = { circumstances: '#A8BCD4', reaction: '#0B2E7A', result: '#17202B', limits: '#2F7FE0' }
 
 /** Хронология фактов: где в окне эпизода что произошло; клик переносит курсор. */
 function FactLine() {
@@ -144,52 +145,6 @@ function FactLine() {
   )
 }
 
-function Narrative() {
-  const { selected, lang } = useStore()
-  const { t } = useT()
-  const [text, setText] = useState<string | null>(null)
-  const [model, setModel] = useState<string | undefined>()
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [llm, setLlm] = useState<{ enabled: boolean } | null>(null)
-  useEffect(() => { api.llm().then(setLlm).catch(() => setLlm(null)) }, [])
-  useEffect(() => {
-    setErr(null); setText(null)
-    if (!selected) return
-    api.episode(selected.id, lang).then((e) => { setText(e.narrative?.text ?? null); setModel(e.narrative?.model) })
-  }, [selected?.id, lang]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (!selected) return null
-  const run = async () => {
-    setBusy(true); setErr(null)
-    try {
-      const r = await api.narrative(selected.id, lang, !!text)
-      setText(r.text); setModel(r.model)
-    } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
-  }
-  return (
-    <section className="ai">
-      <div className="ai-h">
-        <h3>{t('aiTitle')}</h3>
-        {llm?.enabled && (
-          <button className="btn primary" disabled={busy} onClick={run}>
-            {busy ? <span className="spinner" /> : null}{busy ? t('aiBusy') : text ? t('aiRerun') : t('aiRun')}
-          </button>
-        )}
-      </div>
-      {text ? (
-        <div className="ai-text">
-          {text.split(/\n+/).filter(Boolean).map((p, k) => {
-            const head = /^[«"]?[A-ZА-ЯЁ][^.]{0,60}[»"]?:?$/.test(p.trim().replace(/^#+\s*|\*\*/g, ''))
-            return <p key={k} className={head ? 'head' : ''}>{p.replace(/^#+\s*|\*\*/g, '')}</p>
-          })}
-          <small>{t('aiModel')} {model}</small>
-        </div>
-      ) : <p className="hint">{llm?.enabled ? t('aiHint') : t('aiOff')}</p>}
-      {err && <div className="llm-err" role="status"><p>{llmError(err, lang)}</p></div>}
-    </section>
-  )
-}
-
 export default function Episode() {
   const { selected, episodes, kinds, view, lang, set } = useStore()
   const { t, kind, obj, sev } = useT()
@@ -197,21 +152,30 @@ export default function Episode() {
   const n0 = (x: number) => x.toLocaleString(loc, { maximumFractionDigits: 0 })
   const n2 = (x: number) => x.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const [part, setPart] = useState<PartId | null>(null)
+  // правая колонка с хронологией и фактами сворачивается; выбор запоминаем
+  const [sideOpen, setSideOpen] = useState(() => { try { return localStorage.getItem('epSide') !== 'closed' } catch { return true } })
+  const toggleSide = () => setSideOpen((o) => {
+    try { localStorage.setItem('epSide', o ? 'closed' : 'open') } catch { /* приватный режим */ }
+    return !o
+  })
   const list = useMemo(() => episodes.filter((e) => kinds.has(e.kind)), [episodes, kinds])
   if (!selected) return <div className="empty big" role="status"><span className="spinner dark" />{t('epLoading')}</div>
   const e = selected
   const idx = list.findIndex((x) => x.id === e.id)
   const goto = (f: Fact) => set({ cursor: ms(f.t), playing: false })
   const title = `${kind(e.kind)}${e.obj_type !== 'Unknown' && e.kind !== 'traffic_light' ? `: ${obj(e.obj_type)}` : ''}`
-  const views: [View, Key][] = [['3d', 'view3d'], ['2d', 'view2d'], ['video', 'viewVideo']]
+  const views: [View, Key][] = [['3d', 'view3d'], ['2d', 'view2d']]
 
   return (
     <div className="episode">
       <header className="ep-head">
-        <button className="btn ghost" onClick={() => set({ page: 'overview' })}>← {t('back')}</button>
+        <button className="btn ghost back" onClick={() => set({ page: 'overview' })}>
+          <svg viewBox="0 0 16 16" aria-hidden><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="2" /></svg>
+          {t('back')}
+        </button>
         <div className="ep-title">
-          <i style={{ background: KIND_COLOR[e.kind] }} />
-          <h1>{title}</h1>
+          {/* цвет категории несёт сам заголовок, без полоски; бледный цвет ограничения скорости не читается текстом */}
+          <h1 style={{ color: e.kind === 'speed_limit' ? 'var(--ink-2)' : KIND_COLOR[e.kind] }}>{title}</h1>
           <span className={`sev sev-${e.severity}`}>{sev(e.severity)}</span>
         </div>
         <p className="ep-sub">
@@ -219,6 +183,7 @@ export default function Episode() {
           {e.stop ? `, ${t('nearStop')} «${place(e.stop, lang)}»` : ''}
         </p>
         <div className="ep-nav">
+          <AiPanel />
           <button className="btn" disabled={idx <= 0} onClick={() => openEpisode(list[idx - 1].id)}>{t('prev')}</button>
           <button className="btn" disabled={idx < 0 || idx >= list.length - 1} onClick={() => openEpisode(list[idx + 1].id)}>{t('next')}</button>
         </div>
@@ -243,7 +208,9 @@ export default function Episode() {
         </div>
       </div>
 
-      <div className="ep-grid">
+      <AiBanner />
+
+      <div className={`ep-grid ${sideOpen ? '' : 'side-closed'}`}>
         <div className="ep-main">
           <section className="panel viewer">
             <div className="tabs" role="tablist">
@@ -252,6 +219,7 @@ export default function Episode() {
               ))}
               <span className="grow" />
               {view === '3d' && <span className="hint">{t('hoverHint')}</span>}
+              <EpisodeReel />
             </div>
             <div className="viewer-body">
               {view === '3d' && (
@@ -262,7 +230,6 @@ export default function Episode() {
                 </SceneBoundary>
               )}
               {view === '2d' && <Replay2D />}
-              {view === 'video' && <EpisodeReel />}
               {view === '3d' && part && (
                 <div className="part-card">
                   <button className="x" onClick={() => setPart(null)} aria-label="close">×</button>
@@ -280,17 +247,23 @@ export default function Episode() {
             <Charts />
             <div className="legend-bands">
               {t('bands')}:
-              <i style={{ background: 'rgba(213,94,0,.45)' }} />{t('lampDanger')}
-              <i style={{ background: 'rgba(176,122,0,.45)' }} />{t('lampTl')}
-              <i style={{ background: 'rgba(138,147,159,.35)' }} />{t('lampSl')}
-              <i style={{ background: 'rgba(180,68,127,.45)' }} />{t('lampRail')}
+              <i style={{ background: 'rgba(11,46,122,.45)' }} />{t('lampDanger')}
+              <i style={{ background: 'rgba(47,127,224,.45)' }} />{t('lampTl')}
+              <i style={{ background: 'rgba(168,188,212,.35)' }} />{t('lampSl')}
+              <i style={{ background: 'rgba(106,63,208,.45)' }} />{t('lampRail')}
             </div>
           </section>
         </div>
-        <aside className="ep-side">
+        {!sideOpen ? (
+          <button className="side-rail" onClick={toggleSide} aria-expanded={false} aria-controls="ep-side">
+            <span>{lang === 'ru' ? 'Хронология и факты' : 'Timeline and facts'}</span>
+          </button>
+        ) : (
+        <aside className="ep-side" id="ep-side">
+          <button className="side-toggle" onClick={toggleSide} aria-expanded={true} aria-controls="ep-side">
+            {lang === 'ru' ? 'Свернуть панель' : 'Collapse panel'}
+          </button>
           <FactLine />
-          <Narrative />
-          <JevVerdicts />
           {SECTIONS.map((sname) => {
             const facts = e.facts.filter((f) => f.section === sname)
             if (!facts.length) return null
@@ -310,6 +283,7 @@ export default function Episode() {
             )
           })}
         </aside>
+        )}
       </div>
     </div>
   )

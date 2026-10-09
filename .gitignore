@@ -8,3 +8,9 @@ frontend/dist/
 notebooks/.venv/
 notebooks/data_colab/
 .claude/launch.json
+pitch/references/
+pitch/template/fonts/
+pitch/build/
+pitch/build_sirius/
+frontend/public/__edge.js
+frontend/public/_logo_preview.html

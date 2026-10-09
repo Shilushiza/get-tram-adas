@@ -1,0 +1,69 @@
+/* окно «ИИ-анализ»: текст модели набран антиквой, чтобы не путать его с фактами из данных */
+
+.ai-shade { position: fixed; inset: 0; background: rgba(15, 25, 35, .38); z-index: 2000; display: flex; justify-content: flex-end; }
+.ai-drawer {
+  width: min(560px, 100vw); height: 100%; overflow-y: auto; background: var(--bg); padding: 22px 22px 40px;
+  box-shadow: -12px 0 40px rgba(10, 20, 30, .25); display: grid; align-content: start; gap: 16px;
+  animation: ai-in .22s ease-out;
+}
+@keyframes ai-in { from { transform: translateX(24px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ai-drawer { animation: none; } }
+.ai-drawer-h { display: flex; gap: 12px; align-items: flex-start; }
+.ai-drawer-h h2 { font-size: 20px; margin: 0 0 6px; }
+.ai-drawer-h p { margin: 0; color: var(--ink-2); line-height: 1.5; font-size: 13px; }
+.ai-drawer-h .x { margin-left: auto; border: 0; background: none; font-size: 26px; line-height: 1; cursor: pointer; color: var(--ink-2); }
+
+.ai-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); padding: 16px 18px; display: grid; gap: 12px; }
+.ai-card > header h3 { margin: 0; font-size: 16px; }
+.ai-card > header span { color: var(--ink-3); font-size: 12.5px; }
+.ai-card .btn { justify-self: start; }
+.ai-text { font-family: 'PT Serif', Georgia, serif; font-size: 15.5px; line-height: 1.6; color: var(--ink); margin: 0; max-width: 62ch; }
+.ai-model { color: var(--ink-3); font-size: 12px; }
+.ai-err { color: var(--alarm); margin: 0; }
+
+.jev-verdict { border-left: 4px solid var(--ink-3); padding: 8px 12px; background: var(--bg); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.jev-verdict b { display: block; font-size: 13px; margin-bottom: 4px; }
+.jev-verdict.p-high { border-color: var(--alarm); } .jev-verdict.p-high b { color: var(--alarm); }
+.jev-verdict.p-medium { border-color: var(--warn); } .jev-verdict.p-medium b { color: var(--warn); }
+.jev-verdict.p-low { border-color: var(--ok); } .jev-verdict.p-low b { color: var(--ok); }
+.jev-qs { margin: 0; display: grid; gap: 8px; }
+.jev-qs dt { font-weight: 600; font-size: 13px; }
+.jev-qs dd { margin: 2px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.jev-qs .ans { display: inline-block; min-width: 54px; text-align: center; border-radius: 10px; padding: 1px 8px; margin-right: 6px; font-size: 12px; }
+.ans.a-yes { background: rgba(213, 94, 0, .14); color: var(--alarm); }
+.ans.a-no { background: rgba(0, 158, 115, .14); color: var(--ok); }
+.ans.a-unknown { background: var(--line-2); color: var(--ink-2); }
+
+.ai-review { display: grid; gap: 12px; }
+.ai-review h4 { margin: 0 0 3px; font-size: 12.5px; color: var(--ink-3); font-weight: 600; }
+.ai-review .lead { background: var(--bg); border-radius: var(--r-sm); padding: 10px 12px; }
+.ai-review .lead .ai-text { font-size: 17px; font-weight: 700; }
+.ai-open { white-space: nowrap; }
+
+/* ответы Jev: цветное слово со свечением, без плашки */
+.jev-qs .ans { background: none !important; min-width: 0; padding: 0; margin-right: 8px; font-size: 13px; font-weight: 700; text-align: left; }
+.ans.a-yes { color: #e2541a; text-shadow: 0 0 6px rgba(226, 84, 26, .45), 0 0 14px rgba(226, 84, 26, .25); }
+.ans.a-no { color: #00936b; text-shadow: 0 0 6px rgba(0, 147, 107, .4), 0 0 14px rgba(0, 147, 107, .2); }
+.ans.a-unknown { color: var(--ink-2); }
+/* имена полей в тексте модели: мелким гротеском, чтобы вывод читался без шума */
+.ai-field { font-family: 'Golos Text', sans-serif; font-size: .72em; font-weight: 400; color: var(--ink-3); letter-spacing: .1px; }
+.ai-drawer-h .x { width: 36px; height: 36px; display: grid; place-items: center; padding: 0; line-height: 1; flex: none; }
+
+/* кнопка ИИ в шапке: иконка искры и мягкое свечение бренда */
+.ai-open { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; font-weight: 700;
+  box-shadow: 0 0 0 1px var(--brand), 0 0 14px rgba(29, 79, 196, .45); }
+.ai-open:hover { box-shadow: 0 0 0 1px var(--brand-ink), 0 0 20px rgba(29, 79, 196, .6); }
+.spark { width: 16px; height: 16px; flex: none; }
+
+/* полоса-приглашение к ИИ-анализу */
+.ai-banner { width: 100%; display: flex; align-items: center; gap: 16px; margin: 0 0 16px; padding: 14px 18px;
+  background: var(--inset); color: #fff; border: 1px solid #2e4a73; cursor: pointer; text-align: left; font: inherit;
+  box-shadow: inset 0 0 0 1px rgba(143, 182, 242, .15), 0 0 22px rgba(29, 79, 196, .25); }
+.ai-banner .spark { width: 26px; height: 26px; color: #8fb6f2; filter: drop-shadow(0 0 6px rgba(143, 182, 242, .8)); }
+.ai-banner-t { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.ai-banner-t b { font-size: 15px; }
+.ai-banner-t span { color: #b9c6da; font-size: 13px; line-height: 1.45; }
+.ai-banner-go { flex: none; font-weight: 700; color: #8fb6f2; text-shadow: 0 0 8px rgba(143, 182, 242, .7); white-space: nowrap; }
+.ai-banner:hover { border-color: #8fb6f2; }
+.ai-banner:hover .ai-banner-go { color: #fff; }
+@media (max-width: 700px) { .ai-banner { flex-wrap: wrap; } .ai-banner-go { width: 100%; } }

@@ -7,8 +7,8 @@ import type { Series } from '../api'
 // заливка, когда воздействие применено: верхняя половина для подсистем, нижняя для тормозов
 // цвета те же, что у типов срабатываний (KIND_COLOR): препятствие киноварь, светофор янтарь, тормоза пурпур
 export const BANDS: [string, string, number][] = [
-  ['sl_real', 'rgba(138,147,159,.18)', 0], ['tl_real', 'rgba(176,122,0,.24)', 0], ['danger_real', 'rgba(213,94,0,.24)', 0],
-  ['brake_rail', 'rgba(180,68,127,.22)', 1], ['brake_crash', 'rgba(180,68,127,.38)', 1], ['brake_emergency', 'rgba(180,68,127,.55)', 1],
+  ['sl_real', 'rgba(168,188,212,.18)', 0], ['tl_real', 'rgba(47,127,224,.24)', 0], ['danger_real', 'rgba(11,46,122,.24)', 0],
+  ['brake_rail', 'rgba(106,63,208,.22)', 1], ['brake_crash', 'rgba(106,63,208,.38)', 1], ['brake_emergency', 'rgba(106,63,208,.55)', 1],
 ]
 
 function bandsPlugin(get: () => Series | null): uPlot.Plugin {
@@ -56,7 +56,8 @@ function cursorPlugin(get: () => number | null): uPlot.Plugin {
 
 const tz = (ts: number) => uPlot.tzDate(new Date(ts), 'Europe/Moscow')
 const col = (s: Series, k: string) => (s[k] as (number | null)[] | undefined) ?? s.t.map(() => null)
-const fmt = (d: number) => (v: number | null) => (v == null ? '-' : v.toFixed(d))
+// без курсора над графиком значение пустое, а не «-», чтобы легенда не выглядела сломанной
+const fmt = (d: number) => (v: number | null) => (v == null ? '' : v.toFixed(d))
 
 export default function Charts() {
   const win = useStore((s) => s.win)
@@ -80,6 +81,7 @@ export default function Charts() {
     const xAxis = { ...axisStyle, values: (_u: uPlot, splits: number[]) => splits.map(clock) }
     const common = (h: number) => ({
       width, height: h, ms: 1 as const, tzDate: tz,
+      padding: [8, 34, 0, 0] as uPlot.Padding,   // справа запас: последняя метка времени не упирается в край панели
       cursor: { sync: { key: 'ep' }, drag: { x: false, y: false } },
       plugins: [bandsPlugin(() => winRef.current), cursorPlugin(() => curRef.current)],
       axes: [xAxis, { ...axisStyle, size: 40 }],

@@ -319,37 +319,73 @@ async def job_stream(job_id: str):
 # ---------- ИИ-разбор через OpenRouter ----------
 
 PROMPTS = {
-    "ru": """Ты аналитик системы помощи водителю трамвая. Ниже проверенные факты эпизода из бортовых данных,
-сгруппированные по разделам; у каждого факта есть время и поле-источник.
-Напиши связный разбор на русском из четырёх абзацев с заголовками:
-«Обстоятельства и известная причина», «Реакция системы», «Наблюдаемый результат», «Ограничения анализа».
-Правила: каждое утверждение с временной меткой ЧЧ:ММ:СС; используй ТОЛЬКО приведённые факты;
-не придумывай объекты, типы тормозов, расстояния и действия водителя; если причина не подтверждена полем,
-прямо напиши, что причина не установлена. Поле goal_obj_type показывает объект, по которому система
-задавала скорость: это подтверждённое обстоятельство, называй его так, но не утверждай, что объект был в опасной близости.
-Ссылки на поля пиши в скобках. Без длинных тире, без markdown-разметки кроме заголовков абзацев.
+    "ru": """Ты опытный аналитик бортовой системы помощи водителю трамвая (АБПВ). Пишешь коллеге, который откроет
+эпизод через минуту и должен сразу понять, что произошло, и решить, что делать дальше.
+
+Ниже проверенные факты одного эпизода из бортовых данных. У каждого факта есть время и поле-источник.
+
+Напиши ответ строго в таком виде (заголовки как есть, обычный текст без markdown, без длинных тире):
+
+Вывод: одно-два предложения простым языком: что увидела система, как отреагировала и чем закончилось
+(остановился трамвай или нет, с какой скорости до какой). Это главное, пиши конкретно и с цифрами.
+
+Что произошло: 1-3 предложения. Объясняй смысл, а не перечисляй признаки. Например, вместо
+«goal_obj_type=Vehicle» пиши «система задавала скорость по автомобилю впереди (goal_obj_type)».
+
+Как отреагировала система: 1-3 предложения в порядке времени: предупреждение, торможение, кто управлял.
+
+Чем закончилось: 1-2 предложения.
+
+Чего мы не знаем: 1-2 предложения о главных ограничениях данных для ЭТОГО эпизода.
+
+Что проверить: 1-2 конкретных действия для аналитика (что открыть, на что посмотреть).
+
+Правила: каждое утверждение о событии с меткой времени ЧЧ:ММ:СС; используй ТОЛЬКО приведённые факты;
+не придумывай объекты, расстояния, тормоза и действия водителя; если причина не подтверждена полем, так и напиши;
+goal_obj_type это объект, по которому система задавала скорость, а не доказанная близость к нему.
+Поля указывай в скобках в конце фразы. Коротко: весь ответ до 170 слов.
 
 Эпизод {id}, вагон {wagon}, тип: {kind}.
+Факты:
 {facts}""",
-    "en": """You are an analyst of a tram driver-assistance system. Below are verified facts of one episode from onboard data,
-grouped by section; each fact has a time and a source field.
-Write a coherent review in English with four paragraphs and headings:
-"Circumstances and known cause", "System response", "Observed outcome", "Limits of the analysis".
-Rules: every statement carries an HH:MM:SS timestamp; use ONLY the given facts; do not invent objects, brake types,
-distances or driver actions; if no field confirms the cause, say the cause is not established. The goal_obj_type field
-is the object the system used to set the target speed: state it as such, do not claim it was dangerously close.
-Put field references in parentheses. No em dashes, no markdown except paragraph headings.
+    "en": """You are an experienced analyst of a tram driver-assistance system (ADAS). You write for a colleague who will open
+this episode in a minute and must immediately understand what happened and decide what to do next.
+
+Below are verified facts of one episode from onboard data. Each fact has a time and a source field.
+
+Answer strictly in this form (keep the headings, plain text, no markdown, no em dashes):
+
+Conclusion: one or two plain sentences: what the system saw, how it responded and how it ended
+(did the tram stop, from what speed to what). This is the key part: be concrete, use numbers.
+
+What happened: 1-3 sentences. Explain the meaning instead of listing flags. For example, instead of
+"goal_obj_type=Vehicle" write "the system set the target speed by a vehicle ahead (goal_obj_type)".
+
+System response: 1-3 sentences in time order: warning, braking, who was in control.
+
+Outcome: 1-2 sentences.
+
+What we do not know: 1-2 sentences on the main data limits for THIS episode.
+
+What to check: 1-2 concrete actions for the analyst (what to open, what to look at).
+
+Rules: every statement about an event carries an HH:MM:SS timestamp; use ONLY the given facts; do not invent objects,
+distances, brakes or driver actions; if no field confirms the cause, say so; goal_obj_type is the object the system
+used to set speed, not proof that it was close. Put fields in parentheses at the end of a sentence. Keep it short:
+under 170 words in total.
 
 Episode {id}, wagon {wagon}, type: {kind}.
+Facts:
 {facts}""",
 }
+PROMPT_VERSION = "v2"  # новый промпт: свой кеш, старые ответы не подмешиваются
 SEC = {"ru": {"circumstances": "Обстоятельства", "reaction": "Реакция", "result": "Результат", "limits": "Ограничения"},
        "en": {"circumstances": "Circumstances", "reaction": "Response", "result": "Outcome", "limits": "Limits"}}
 DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 
 
 def _narr_path(eid: str, lang: str) -> Path:
-    return NARR / (eid.replace("#", "~") + ("" if lang == "ru" else f".{lang}") + ".json")
+    return NARR / (eid.replace("#", "~") + f".{PROMPT_VERSION}" + ("" if lang == "ru" else f".{lang}") + ".json")
 
 
 def _cached_narrative(eid: str, lang: str = "ru"):
@@ -396,22 +432,32 @@ def narrative(eid: str, force: bool = False, lang: str = "ru"):
     return out
 
 
-# ---------- Джеф: лёгкая модель-судья «да / нет / не знаю» ----------
+# ---------- Jev: лёгкая модель, ставит эпизод в очередь разбора и объясняет почему ----------
 
 JEV_QUESTIONS = {
     "harm": "Был ли риск вреда людям (пешеходу, пассажирам, другим участникам)?",
     "false_alarm": "Похоже ли срабатывание на ложное (опасности не было)?",
     "review": "Нужен ли этому эпизоду ручной разбор специалистом?",
 }
-JEV_PROMPT = """Ты лёгкий классификатор. По фактам эпизода системы помощи водителю трамвая ответь на вопросы
-строго одним словом: yes, no или unknown. unknown, если фактов не хватает. Не додумывай.
-goal_obj_type означает объект, по которому система задавала скорость, а не доказанную близость: расстояния в данных нет, не пиши «рядом».
-Верни только JSON вида {{"harm": {{"a": "yes|no|unknown", "why": "до 15 слов по-русски"}}, "false_alarm": {{...}}, "review": {{...}}}}.
+JEV_PROMPT = """Ты Jev, лёгкий помощник аналитика. Твоя задача: по фактам эпизода системы помощи водителю трамвая
+решить, в какую очередь его ставить на ручной разбор, и коротко объяснить почему.
 
-Вопросы:
-harm: {harm}
-false_alarm: {false_alarm}
-review: {review}
+Как рассуждать:
+- Риск вреда (harm) = yes только если есть экстренный, аварийный или рельсовый тормоз, или юз, или скорость упала
+  больше чем на 15 км/ч с замедлением от 1.5 м/с². Тип объекта (goal_obj_type) сам по себе риск НЕ доказывает:
+  в данных нет расстояния до объекта. Если тормозов нет и скорость почти не упала, harm = no.
+- Ложное срабатывание (false_alarm) = yes, если торможение было, а объект не записан (Unknown) и скорость почти не
+  изменилась или трамвай и так стоял; no, если объект записан и трамвай реально тормозил; иначе unknown.
+- Ручной разбор (review) = yes, если harm = yes, или false_alarm = yes (это вопрос к калибровке), или есть юз;
+  no для штатных случаев (светофор, плавное снижение без жёстких тормозов).
+- priority: high, если harm = yes; medium, если review = yes; иначе low.
+- summary: одно предложение-вывод для очереди по-русски, до 20 слов, с главной цифрой. Например:
+  «Разобрать первым: рельсовый тормоз с 27 до 0 км/ч перед автомобилем.» или «Штатно: плавное снижение у светофора.»
+- why: до 15 слов по-русски, конкретная причина ответа. unknown, если фактов не хватает. Не додумывай.
+
+Верни только JSON:
+{{"priority": "high|medium|low", "summary": "...", "harm": {{"a": "yes|no|unknown", "why": "..."}},
+"false_alarm": {{"a": "...", "why": "..."}}, "review": {{"a": "...", "why": "..."}}}}
 
 Эпизод: тип {kind}, скорость {v0}→{v1} км/ч, макс. замедление {dec} м/с², остановка: {stop}, тормоза: {brakes}.
 Факты:
@@ -424,7 +470,7 @@ def jev(eid: str, run: bool = False):
     e = BY_ID.get(eid.replace("~", "#"))
     if not e:
         raise HTTPException(404)
-    f = NARR / (e["id"].replace("#", "~") + ".jev.json")
+    f = NARR / (e["id"].replace("#", "~") + f".jev.{PROMPT_VERSION}.json")
     if f.exists():
         return json.loads(f.read_text(encoding="utf-8"))
     if not run:
@@ -438,7 +484,7 @@ def jev(eid: str, run: bool = False):
                                stop="да" if e["stopped"] else "нет", brakes=", ".join(e["hard_brakes"]) or "нет", facts=facts)
     r = httpx.post("https://openrouter.ai/api/v1/chat/completions",
                    headers={"Authorization": f"Bearer {key}"},
-                   json={"model": model, "temperature": 0, "max_tokens": 400, "reasoning": {"enabled": False},
+                   json={"model": model, "temperature": 0, "max_tokens": 500, "reasoning": {"enabled": False},
                          "response_format": {"type": "json_object"},
                          "messages": [{"role": "user", "content": prompt}]}, timeout=60)
     if r.status_code != 200:
@@ -448,7 +494,8 @@ def jev(eid: str, run: bool = False):
         ans = json.loads(txt[txt.find("{"): txt.rfind("}") + 1])
     except ValueError:
         raise HTTPException(502, "модель вернула не JSON")
-    out = {"model": model, "answers": {k: ans.get(k, {"a": "unknown", "why": ""}) for k in JEV_QUESTIONS}}
+    out = {"model": model, "priority": ans.get("priority", "medium"), "summary": ans.get("summary", ""),
+           "answers": {k: ans.get(k, {"a": "unknown", "why": ""}) for k in JEV_QUESTIONS}}
     NARR.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     return out

@@ -3,7 +3,7 @@ import type { Episode, EpisodeSummary, Kind, Series, Trip } from './api'
 import type { Lang } from './i18n'
 
 export type Page = 'overview' | 'episode' | 'upload' | 'guide'
-export type View = '3d' | '2d' | 'video'
+export type View = '3d' | '2d'
 
 interface State {
   lang: Lang

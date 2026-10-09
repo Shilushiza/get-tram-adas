@@ -1,3 +1,4 @@
+import './map.css'
 import VideoPanel from '../components/VideoPanel'
 import { useEffect, useState, type ReactNode } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Tooltip as LTooltip } from 'react-leaflet'
@@ -22,6 +23,19 @@ function Kpi({ value, label, tone, wide, children }: {
   )
 }
 
+/** Знак 5.17 «Место остановки трамвая»: синий прямоугольник с белой каймой и силуэтом трамвая. */
+function StopSign() {
+  return (
+    <svg className="stop-sign" viewBox="0 0 14 16" aria-hidden>
+      <rect x=".5" y=".5" width="13" height="15" rx="1.6" fill="currentColor" />
+      <rect x="1.7" y="1.7" width="10.6" height="12.6" rx=".9" fill="none" stroke="#fff" strokeWidth=".9" />
+      <path d="M3.4 6.2h6.4l1.2 2.3v2.6H3.4z" fill="#fff" />
+      <path d="M7 6.2 8.3 4.3h-2" stroke="#fff" strokeWidth=".7" fill="none" />
+      <path d="M2.8 12.3h8.4" stroke="#fff" strokeWidth=".7" />
+    </svg>
+  )
+}
+
 /** Тонкая полоса долей: контекст к числу вместо пустой подписи. */
 function Share({ parts }: { parts: { v: number; c: string; title: string }[] }) {
   const sum = parts.reduce((a, p) => a + p.v, 0) || 1
@@ -40,11 +54,22 @@ function WagonStrip({ s, fmt1 }: { s: Stats; fmt1: (n: number) => string }) {
   const max = Math.max(...w.map((x) => x.per100!)) * 1.08
   const x = (v: number) => `${(v / max) * 100}%`
   const avg = s.per100km
+  // вагоны заметно чаще парка; близкие по значению (точки сливаются) подписываем одной меткой
+  const hi = w.filter((r) => r.per100! > avg * 1.25).sort((a, b) => b.per100! - a.per100!)
+  const groups: typeof hi[] = []
+  for (const r of hi) {
+    const g = groups[groups.length - 1]
+    if (g && Math.abs(g[0].per100! - r.per100!) / max < 0.04) g.push(r); else groups.push([r])
+  }
   return (
     <div className="wstrip">
       <div className="wstrip-track">
         <span className="wstrip-avg" style={{ left: x(avg) }} />
-        {w.filter((r) => r.per100! > avg * 1.25).map((r, k) => <em key={r.wagon} style={{ left: x(r.per100!), bottom: 17 + k * 13 }}>№ {r.wagon}</em>)}
+        {groups.map((g) => (
+          <em key={g.map((r) => r.wagon).join()} style={{ left: x(g[0].per100!) }}>
+            {g.map((r) => `№ ${r.wagon}`).join(', ')}: {fmt1(g[0].per100!)}
+          </em>
+        ))}
         {w.map((r) => (
           <i key={r.wagon} className={r.per100! > avg * 1.25 ? 'hi' : ''} style={{ left: x(r.per100!) }}
             title={`${t('wagon')} ${r.wagon}: ${fmt1(r.per100!)}`} />
@@ -123,8 +148,9 @@ export default function Overview() {
               <Kpi wide value={s.per100km != null ? fmt1(s.per100km) : '-'} label={`${t('kpiEpisodes')} ${t('kpiPer100')}`}>
                 <WagonStrip s={s} fmt1={fmt1} />
               </Kpi>
-              <Kpi value={fmt(s.critical)} label={t('kpiCritical')} tone="alarm">
+              <Kpi value={pct(s.total ? s.critical / s.total : 0)} label={t('kpiCritical')} tone="alarm">
                 <Share parts={[{ v: s.critical, c: 'var(--alarm)', title: t('kpiCritical') }, { v: s.total - s.critical, c: 'var(--line)', title: sev(1) }]} />
+                <small className="kpi-note">{fmt(s.critical)} {lang === 'ru' ? 'из' : 'of'} {fmt(s.total)}</small>
               </Kpi>
               <Kpi value={pct(s.assist_share)} label={t('kpiAssist')} tone="assist">
                 <Share parts={Object.entries(s.by_controller).map(([k, v]) => ({ v, c: CTRL_COLOR[k], title: ctrl(k) }))} />
@@ -142,12 +168,18 @@ export default function Overview() {
 
       <div className="kind-filter" role="group">
         {KINDS.map((k) => (
-          <button key={k} className="chip" aria-pressed={kinds.has(k)} onClick={() => toggleKind(k)}>
+          <button key={k} className={`chip kind k-${k} ${k === 'speed_limit' || k === 'skid' ? 'pale' : ''}`} style={{ '--c': KIND_COLOR[k] } as React.CSSProperties} aria-pressed={kinds.has(k)} onClick={() => toggleKind(k)}>
             <i style={{ background: KIND_COLOR[k] }} />{kind(k)}
             {s?.by_kind[k] != null && <b>{fmt(s.by_kind[k])}</b>}
           </button>
         ))}
       </div>
+      {s && (
+        <p className="kind-note">
+          {t('kindShown')} <b>{fmt(s.total)}</b> {t('of')} <b>{fmt(s.total_all)}</b>.{' '}
+          {!kinds.has('speed_limit') && t('kindSlHidden')}
+        </p>
+      )}
 
       {!s && (
         <div className="grid" aria-busy="true">
@@ -167,7 +199,9 @@ export default function Overview() {
                   <span className="when">{dmy(ms(e.start))} {hms(ms(e.start))}</span>
                   <span className="what">{kind(e.kind)}{e.obj_type !== 'Unknown' && e.kind !== 'traffic_light' ? `: ${obj(e.obj_type)}` : ''}</span>
                   <span className="dv">{e.speed_start - e.speed_min >= 1 ? `−${Math.round(e.speed_start - e.speed_min)} ${t('kmh')}` : ''}</span>
-                  <span className="where">{e.stop ? place(e.stop, lang) : `${t('wagon')} ${e.wagon}`}</span>
+                  <span className="where">{e.stop
+                    ? <><StopSign />{place(e.stop, lang)}</>
+                    : <>{t('wagon')} <span className="bort">{e.wagon}</span></>}</span>
                   <span className="decel" title={t('maxDecel')}>
                     <span className="meter"><i style={{ left: 0, width: `${Math.min(e.max_decel / 3, 1) * 100}%`, background: e.severity >= 3 ? 'var(--alarm)' : 'var(--ink-2)' }} /></span>
                     {fmt2(e.max_decel)}
@@ -182,8 +216,9 @@ export default function Overview() {
             <p className="insight">{ins.map}</p>
             <div className="map">
               <MapContainer center={[59.94, 30.36]} zoom={11} scrollWheelZoom style={{ height: '100%', width: '100%' }}>
-                <TileLayer attribution='Tiles &copy; Esri'
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}" />
+                {/* OpenStreetMap: доступен в России без VPN; серые тайлы, чтобы точки срабатываний читались */}
+                <TileLayer className="tiles-muted" attribution='&copy; OpenStreetMap'
+                  url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
                 {s.points.map(([la, lo, k, sv, id]) => (
                   <CircleMarker key={id} center={[la, lo]} radius={sv >= 2 ? 6 : 3.5}
                     pathOptions={{ color: KIND_COLOR[k], fillColor: KIND_COLOR[k], fillOpacity: sv >= 2 ? 0.75 : 0.35, weight: sv >= 2 ? 1.5 : 0 }}
@@ -205,7 +240,7 @@ export default function Overview() {
                 label: { show: false },
                 data: ks.filter((k) => s.by_kind[k]).map((k) => ({ name: kind(k), value: s.by_kind[k], itemStyle: { color: KIND_COLOR[k] } })),
               }],
-              graphic: [{ type: 'text', left: 'center', top: '43%', style: { text: fmt(s.total), font: '600 26px IBM Plex Sans Condensed', fill: '#17202B' } },
+              graphic: [{ type: 'text', left: 'center', top: '43%', style: { text: fmt(s.total), font: '700 30px Sofia Sans Condensed', fill: '#13203A' } },
                 { type: 'text', left: 'center', top: '56%', style: { text: t('kpiEpisodes'), font: '12px Golos Text', fill: '#5d6a72' } }],
             }} />
             <ul className="legend">
@@ -244,7 +279,7 @@ export default function Overview() {
               xAxis: { type: 'value', ...AXIS },
               series: [{
                 type: 'bar', barWidth: 16,
-                data: wagons.map((w) => ({ value: w.per100, itemStyle: { color: (w.per100 ?? 0) > (s.per100km ?? 0) * 1.25 ? '#D55E00' : '#8A939F', borderRadius: [0, 3, 3, 0] } })),
+                data: wagons.map((w) => ({ value: w.per100, itemStyle: { color: (w.per100 ?? 0) > (s.per100km ?? 0) * 1.25 ? '#0B2E7A' : '#A8BCD4', borderRadius: [0, 3, 3, 0] } })),
                 label: { show: true, position: 'right', color: '#33424c', fontSize: 11, formatter: (p: { value: unknown }) => fmt1(Number(p.value)) },
                 markLine: s.per100km == null ? undefined : {
                   symbol: 'none', silent: true, lineStyle: { color: '#17202B', type: 'solid', width: 1.5 },
@@ -291,7 +326,7 @@ export default function Overview() {
                 type: 'pie', radius: ['45%', '78%'], padAngle: 2, itemStyle: { borderRadius: 5 },
                 label: { color: '#33424c', formatter: (p: { name?: string; percent?: number }) => `${p.name}\n${Math.round(p.percent ?? 0)}%`, fontSize: 12 },
                 data: [
-                  ...Object.entries(s.by_obj).map(([k, v]) => ({ name: obj(k), value: v, itemStyle: { color: OBJ_COLOR[k] ?? '#8A939F' } })),
+                  ...Object.entries(s.by_obj).map(([k, v]) => ({ name: obj(k), value: v, itemStyle: { color: OBJ_COLOR[k] ?? '#A8BCD4' } })),
                   { name: t('unknown'), value: s.obj_unknown, itemStyle: { color: '#dde3e6' } },
                 ],
               }],
@@ -309,7 +344,7 @@ export default function Overview() {
                 axisLabel: { ...AXIS.axisLabel, width: 170, overflow: 'truncate' } },
               xAxis: { type: 'value', show: false },
               series: [
-                { name: sev(2), type: 'bar', stack: 's', data: s.stops.map((x) => x.crit), itemStyle: { color: '#D55E00' }, barWidth: 13 },
+                { name: sev(2), type: 'bar', stack: 's', data: s.stops.map((x) => x.crit), itemStyle: { color: '#0B2E7A' }, barWidth: 13 },
                 { name: sev(1), type: 'bar', stack: 's', data: s.stops.map((x) => x.n - x.crit), itemStyle: { color: '#c9d1d5', borderRadius: [0, 3, 3, 0] },
                   label: { show: true, position: 'right', formatter: (p: { dataIndex: number }) => String(s.stops[p.dataIndex].n), color: '#33424c', fontSize: 11 } },
               ],
