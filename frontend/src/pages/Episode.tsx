@@ -4,11 +4,19 @@ import { useStore, type View } from '../store'
 import { place, useT, type Key } from '../i18n'
 import Tram3D, { PARTS, type PartId } from '../components/Tram3D'
 import Replay2D from '../components/Replay2D'
-import VideoPanel from '../components/VideoPanel'
+import EpisodeReel from '../components/EpisodeReel'
 import Charts from '../components/Charts'
 import { openEpisode } from '../nav'
+import JevVerdicts, { llmError } from '../components/JevVerdicts'
+import SceneBoundary from '../components/SceneBoundary'
 
 const SECTIONS = ['circumstances', 'reaction', 'result', 'limits'] as const
+
+/** Шкала под числом: где значение относительно разумного максимума. */
+function Meter({ v, max, from, color }: { v: number; max: number; from?: number; color: string }) {
+  const a = Math.max(0, Math.min(1, (from ?? 0) / max)), b = Math.max(0, Math.min(1, v / max))
+  return <div className="meter" aria-hidden><i style={{ left: `${a * 100}%`, width: `${Math.max(b - a, 0.01) * 100}%`, background: color }} /></div>
+}
 
 function Player() {
   const { win, cursor, playing, rate, selected, set } = useStore()
@@ -57,9 +65,9 @@ function Player() {
 }
 
 const LAMPS: [string, Key, string][] = [
-  ['danger_real', 'lampDanger', '#d1352b'], ['tl_real', 'lampTl', '#e3a21a'], ['sl_real', 'lampSl', '#8c9aa3'],
-  ['brake_mech', 'lampMech', '#16222b'], ['brake_rail', 'lampRail', '#6d2c91'], ['brake_crash', 'lampCrash', '#6d2c91'],
-  ['brake_emergency', 'lampEmerg', '#6d2c91'], ['as_is_skid', 'lampSkid', '#138a8a'],
+  ['danger_real', 'lampDanger', '#D55E00'], ['tl_real', 'lampTl', '#B07A00'], ['sl_real', 'lampSl', '#8A939F'],
+  ['brake_mech', 'lampMech', '#17202B'], ['brake_rail', 'lampRail', '#B4447F'], ['brake_crash', 'lampCrash', '#B4447F'],
+  ['brake_emergency', 'lampEmerg', '#B4447F'], ['as_is_skid', 'lampSkid', '#009E73'],
 ]
 
 function StateStrip() {
@@ -73,19 +81,18 @@ function StateStrip() {
   const hd = num(win, 'handle_driver', i) ?? 0, ha = num(win, 'handle_assistant', i) ?? 0
   return (
     <div className="state-strip">
-      <div className="gauge">
-        <svg viewBox="0 0 120 70" aria-hidden>
-          <path d="M10 62 A50 50 0 0 1 110 62" stroke="#e3e8ea" strokeWidth="10" fill="none" strokeLinecap="round" />
-          <path d="M10 62 A50 50 0 0 1 110 62" stroke="#16222b" strokeWidth="10" fill="none" strokeLinecap="round"
-            strokeDasharray={`${(Math.min(v ?? 0, 70) / 70) * 157} 157`} />
-          {g != null && <circle cx={60 - 50 * Math.cos((Math.min(g, 70) / 70) * Math.PI)} cy={62 - 50 * Math.sin((Math.min(g, 70) / 70) * Math.PI)} r="5" fill="#2f9e5f" />}
-        </svg>
-        <b>{v == null ? '-' : v.toFixed(0)}</b>
-        <span>{t('kmh')}{g != null ? `, ${t('target')} ${g.toFixed(0)}` : ''}</span>
+      <div className="spd">
+        <div className="spd-v"><b>{v == null ? '-' : v.toFixed(0)}</b><span>{t('kmh')}</span></div>
+        <div className="spd-track" aria-hidden>
+          <i style={{ width: `${(Math.min(v ?? 0, 70) / 70) * 100}%` }} />
+          {g != null && <em style={{ left: `${(Math.min(g, 70) / 70) * 100}%` }} />}
+        </div>
+        <div className="spd-scale" aria-hidden><span>0</span><span>35</span><span>70</span></div>
+        <small>{g != null ? `${t('target')} ${g.toFixed(0)} ${t('kmh')}` : ' '}</small>
       </div>
       <div className="handles">
         <span>{t('control')}: <b className={`ctrl ctrl-${c}`}>{ctrl(c)}</b></span>
-        {[['sHDriver', hd, '#16222b'], ['sHAssist', ha, '#2f6fd6']].map(([k, val, colr]) => (
+        {[['sHDriver', hd, '#17202B'], ['sHAssist', ha, '#0072B2']].map(([k, val, colr]) => (
           <div className="hbar" key={k as string}>
             <small>{t(k as Key)}</small>
             <div className="track"><i style={{ left: '50%', width: `${Math.abs(val as number) / 30 * 100}%`, transform: (val as number) < 0 ? 'translateX(-100%)' : 'none', background: colr as string }} /></div>
@@ -101,6 +108,39 @@ function StateStrip() {
         })}
       </div>
     </div>
+  )
+}
+
+const SEC_COLOR: Record<string, string> = { circumstances: '#8A939F', reaction: '#D55E00', result: '#17202B', limits: '#B07A00' }
+
+/** Хронология фактов: где в окне эпизода что произошло; клик переносит курсор. */
+function FactLine() {
+  const { selected, win, cursor, set } = useStore()
+  const { t } = useT()
+  if (!selected || !win) return null
+  const t0 = win.t[0], t1 = win.t[win.t.length - 1]
+  const x = (v: number) => `${Math.max(0, Math.min(1, (v - t0) / (t1 - t0))) * 100}%`
+  return (
+    <section className="factline">
+      <h3>{t('timeline')}</h3>
+      {SECTIONS.map((sec) => {
+        const fs = selected.facts.filter((f) => f.section === sec)
+        if (!fs.length) return null
+        return (
+          <div className="fl-row" key={sec}>
+            <small>{t(`ss_${sec}` as Key)}</small>
+            <div className="fl-track">
+              {cursor != null && <span className="fl-cur" style={{ left: x(cursor) }} />}
+              {fs.map((f, k) => (
+                <button key={k} style={{ left: x(ms(f.t)), background: SEC_COLOR[sec] }} title={`${hms(ms(f.t))} ${f.text}`}
+                  aria-label={`${hms(ms(f.t))}`} onClick={() => set({ cursor: ms(f.t), playing: false })} />
+              ))}
+            </div>
+          </div>
+        )
+      })}
+      <div className="fl-axis"><span>{hms(t0)}</span><span>{hms(t1)}</span></div>
+    </section>
   )
 }
 
@@ -145,7 +185,7 @@ function Narrative() {
           <small>{t('aiModel')} {model}</small>
         </div>
       ) : <p className="hint">{llm?.enabled ? t('aiHint') : t('aiOff')}</p>}
-      {err && <p className="err">{t('aiErr')}: {err}</p>}
+      {err && <div className="llm-err" role="status"><p>{llmError(err, lang)}</p></div>}
     </section>
   )
 }
@@ -153,9 +193,12 @@ function Narrative() {
 export default function Episode() {
   const { selected, episodes, kinds, view, lang, set } = useStore()
   const { t, kind, obj, sev } = useT()
+  const loc = lang === 'ru' ? 'ru-RU' : 'en-US'
+  const n0 = (x: number) => x.toLocaleString(loc, { maximumFractionDigits: 0 })
+  const n2 = (x: number) => x.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const [part, setPart] = useState<PartId | null>(null)
   const list = useMemo(() => episodes.filter((e) => kinds.has(e.kind)), [episodes, kinds])
-  if (!selected) return <div className="empty big">…</div>
+  if (!selected) return <div className="empty big" role="status"><span className="spinner dark" />{t('epLoading')}</div>
   const e = selected
   const idx = list.findIndex((x) => x.id === e.id)
   const goto = (f: Fact) => set({ cursor: ms(f.t), playing: false })
@@ -182,10 +225,22 @@ export default function Episode() {
       </header>
 
       <div className="ep-kpis">
-        <div><b>{e.speed_start.toFixed(0)} → {e.speed_min.toFixed(0)}</b><span>{t('speedDrop')}{e.stopped ? `, ${t('stoppedShort')}` : ''}</span></div>
-        <div><b>{e.max_decel.toFixed(2)}</b><span>{t('maxDecel')}</span></div>
-        <div><b>{e.reaction_s == null ? t('none') : `${e.reaction_s.toFixed(0)} s`}</b><span>{t('reaction')}</span></div>
-        <div><b>{e.warn_max ? e.warn_max.toFixed(0) : t('none')}</b><span>{t('warnMax')}</span></div>
+        <div className="ep-kpi speed">
+          <b>{n0(e.speed_start)}<small> {t('kmh')}</small> <span className="to">{t('to')}</span> {n0(e.speed_min)}</b>
+          <span>{t('speedDrop')}{e.stopped ? `, ${t('stoppedShort')}` : ''}</span>
+          <Meter v={e.speed_start} max={70} from={e.speed_min} color="var(--ink)" />
+        </div>
+        <div className="ep-kpi">
+          <b>{n2(e.max_decel)}</b><span>{t('maxDecel')}</span>
+          <Meter v={e.max_decel} max={3} color={e.max_decel >= 1.5 ? 'var(--alarm)' : 'var(--ink-2)'} />
+        </div>
+        <div className="ep-kpi">
+          <b>{e.reaction_s == null ? t('none') : `${n0(e.reaction_s)} ${t('sec')}`}</b><span>{t('reaction')}</span>
+        </div>
+        <div className="ep-kpi">
+          <b>{e.warn_max ? n0(e.warn_max) : t('none')}</b><span>{t('warnMax')}</span>
+          <Meter v={e.warn_max ?? 0} max={255} color="var(--warn)" />
+        </div>
       </div>
 
       <div className="ep-grid">
@@ -199,9 +254,15 @@ export default function Episode() {
               {view === '3d' && <span className="hint">{t('hoverHint')}</span>}
             </div>
             <div className="viewer-body">
-              {view === '3d' && <Tram3D mode="replay" onPick={setPart} />}
+              {view === '3d' && (
+                <SceneBoundary fallback={
+                  <div className="no3d"><p>{t('no3d')}</p><button className="btn" onClick={() => set({ view: '2d' })}>{t('open2d')}</button></div>
+                }>
+                  <Tram3D mode="replay" onPick={setPart} />
+                </SceneBoundary>
+              )}
               {view === '2d' && <Replay2D />}
-              {view === 'video' && <VideoPanel />}
+              {view === 'video' && <EpisodeReel />}
               {view === '3d' && part && (
                 <div className="part-card">
                   <button className="x" onClick={() => setPart(null)} aria-label="close">×</button>
@@ -211,7 +272,7 @@ export default function Episode() {
                 </div>
               )}
             </div>
-            {view !== 'video' && <Player />}
+            <Player />
           </section>
           <StateStrip />
           <section className="panel">
@@ -219,15 +280,17 @@ export default function Episode() {
             <Charts />
             <div className="legend-bands">
               {t('bands')}:
-              <i style={{ background: 'rgba(209,53,43,.55)' }} />{t('lampDanger')}
-              <i style={{ background: 'rgba(227,162,26,.6)' }} />{t('lampTl')}
-              <i style={{ background: 'rgba(140,154,163,.45)' }} />{t('lampSl')}
-              <i style={{ background: 'rgba(109,44,145,.6)' }} />{t('lampRail')}
+              <i style={{ background: 'rgba(213,94,0,.45)' }} />{t('lampDanger')}
+              <i style={{ background: 'rgba(176,122,0,.45)' }} />{t('lampTl')}
+              <i style={{ background: 'rgba(138,147,159,.35)' }} />{t('lampSl')}
+              <i style={{ background: 'rgba(180,68,127,.45)' }} />{t('lampRail')}
             </div>
           </section>
         </div>
         <aside className="ep-side">
+          <FactLine />
           <Narrative />
+          <JevVerdicts />
           {SECTIONS.map((sname) => {
             const facts = e.facts.filter((f) => f.section === sname)
             if (!facts.length) return null

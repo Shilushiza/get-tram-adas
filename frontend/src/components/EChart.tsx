@@ -9,7 +9,7 @@ export const AXIS = {
 }
 
 export const TOOLTIP = {
-  backgroundColor: '#16222b', borderWidth: 0, padding: [8, 12],
+  backgroundColor: '#17202B', borderWidth: 0, padding: [8, 12],
   textStyle: { color: '#fff', fontFamily: 'Golos Text', fontSize: 12 },
 }
 

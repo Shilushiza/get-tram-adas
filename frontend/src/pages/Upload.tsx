@@ -64,6 +64,21 @@ export default function Upload() {
 
       {stage === 'idle' || stage === 'error' ? (
         <>
+          <ol className="stages preview" aria-label={t('upPlan')}>
+            {ORDER.map((st) => <li key={st}><i />{st === 'sending' ? t('upSending') : t(`st_${st}` as Key)}</li>)}
+          </ol>
+          <div className="slots">
+            {([['csv', 'move_detailed_*.csv', 'upCsvNeed'], ['json', '*.jsonseq', 'upJsonOpt']] as const).map(([ext, mask, k]) => {
+              const f = files.find((x) => (ext === 'csv' ? /\.csv$/i : /\.jsonseq$|\.json$/i).test(x.name))
+              return (
+                <div key={ext} className={`slot ${f ? 'ok' : ''}`}>
+                  <span className={`ftype ${ext}`}>{ext}</span>
+                  <div><b>{f ? f.name : mask}</b><small>{f ? `${(f.size / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 })} MB` : t(k)}</small></div>
+                  {f && <svg viewBox="0 0 16 16" aria-hidden><path d="M3 8.5 6.5 12 13 4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </div>
+              )
+            })}
+          </div>
           <div className={`drop ${drag ? 'over' : ''}`} role="button" tabIndex={0}
             onClick={() => input.current?.click()}
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()}
@@ -72,7 +87,6 @@ export default function Upload() {
             onDrop={(e) => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files) }}>
             <svg viewBox="0 0 48 48" aria-hidden><path d="M24 31V11m0 0-8 8m8-8 8 8M10 30v6a3 3 0 0 0 3 3h22a3 3 0 0 0 3-3v-6" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
             <b>{t('upDrop')}</b>
-            <span>.csv · .jsonseq</span>
             <input ref={input} type="file" multiple accept=".csv,.jsonseq,.json" hidden onChange={(e) => add(e.target.files)} />
           </div>
           {files.length > 0 && (
@@ -86,7 +100,8 @@ export default function Upload() {
               ))}
             </ul>
           )}
-          {err && <p className="err">{err}</p>}
+          {err && <p className="err" role="alert">{stage === 'error' ? `${t('upFail')}: ${err}` : err}</p>}
+          {files.some((f) => /\.csv$/i.test(f.name)) && !files.some((f) => /\.jsonseq$|\.json$/i.test(f.name)) && <p className="hint">{t('upNoJson')}</p>}
           <button className="btn primary big" disabled={!files.length} onClick={start}>{t('upStart')}</button>
         </>
       ) : (

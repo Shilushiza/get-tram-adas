@@ -9,7 +9,7 @@ const LABEL: Record<string, { ru: string; en: string }> = {
 }
 
 export default function VideoPanel() {
-  const { t, lang } = useT()
+  const { lang } = useT()
   const [list, setList] = useState<Video[]>([])
   const [cur, setCur] = useState(0)
   useEffect(() => { api.videos().then(setList) }, [])
@@ -25,7 +25,6 @@ export default function VideoPanel() {
           </button>
         ))}
       </div>
-      <p className="hint">{t('videoNote')}</p>
     </div>
   )
 }

@@ -193,6 +193,21 @@ def stats(trip: str = "all", kinds: str = "danger,traffic_light,hard_brake,skid,
     }
 
 
+# ---------- адрес для телефона (QR) ----------
+
+@app.get("/api/lan")
+def lan(port: int = 8000):
+    import socket
+    ips = set()
+    try:
+        ips |= {ai[4][0] for ai in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)}
+    except OSError:
+        pass
+    rank = lambda ip: (0 if ip.startswith("192.168.") else 1 if ip.startswith("10.") else 2, ip)
+    ips = sorted((ip for ip in ips if not ip.startswith("127.")), key=rank)
+    return {"urls": [f"http://{ip}:{port}/" for ip in ips], "public": os.environ.get("PUBLIC_URL")}
+
+
 # ---------- видео с камер ----------
 
 @app.get("/api/videos")
@@ -378,6 +393,64 @@ def narrative(eid: str, force: bool = False, lang: str = "ru"):
     out = {"model": model, "text": text.replace("—", "-").replace("–", "-")}
     NARR.mkdir(parents=True, exist_ok=True)
     _narr_path(e["id"], lang).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+# ---------- Джеф: лёгкая модель-судья «да / нет / не знаю» ----------
+
+JEV_QUESTIONS = {
+    "harm": "Был ли риск вреда людям (пешеходу, пассажирам, другим участникам)?",
+    "false_alarm": "Похоже ли срабатывание на ложное (опасности не было)?",
+    "review": "Нужен ли этому эпизоду ручной разбор специалистом?",
+}
+JEV_PROMPT = """Ты лёгкий классификатор. По фактам эпизода системы помощи водителю трамвая ответь на вопросы
+строго одним словом: yes, no или unknown. unknown, если фактов не хватает. Не додумывай.
+goal_obj_type означает объект, по которому система задавала скорость, а не доказанную близость: расстояния в данных нет, не пиши «рядом».
+Верни только JSON вида {{"harm": {{"a": "yes|no|unknown", "why": "до 15 слов по-русски"}}, "false_alarm": {{...}}, "review": {{...}}}}.
+
+Вопросы:
+harm: {harm}
+false_alarm: {false_alarm}
+review: {review}
+
+Эпизод: тип {kind}, скорость {v0}→{v1} км/ч, макс. замедление {dec} м/с², остановка: {stop}, тормоза: {brakes}.
+Факты:
+{facts}"""
+
+
+@app.post("/api/episodes/{eid}/jev")
+def jev(eid: str, run: bool = False):
+    """Без run=true отдаём только кеш: платный вызов модели идёт по явной кнопке."""
+    e = BY_ID.get(eid.replace("~", "#"))
+    if not e:
+        raise HTTPException(404)
+    f = NARR / (e["id"].replace("#", "~") + ".jev.json")
+    if f.exists():
+        return json.loads(f.read_text(encoding="utf-8"))
+    if not run:
+        return {"model": None, "answers": None}
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise HTTPException(400, "OPENROUTER_API_KEY не задан")
+    model = os.environ.get("JEV_MODEL", "qwen/qwen3.8-flash")
+    facts = "\n".join(f"{x['t'][11:19]} {x['text']}" for x in json.loads(FACTS[e["id"]]))
+    prompt = JEV_PROMPT.format(**JEV_QUESTIONS, kind=e["kind"], v0=e["speed_start"], v1=e["speed_min"], dec=e["max_decel"],
+                               stop="да" if e["stopped"] else "нет", brakes=", ".join(e["hard_brakes"]) or "нет", facts=facts)
+    r = httpx.post("https://openrouter.ai/api/v1/chat/completions",
+                   headers={"Authorization": f"Bearer {key}"},
+                   json={"model": model, "temperature": 0, "max_tokens": 400, "reasoning": {"enabled": False},
+                         "response_format": {"type": "json_object"},
+                         "messages": [{"role": "user", "content": prompt}]}, timeout=60)
+    if r.status_code != 200:
+        raise HTTPException(502, f"OpenRouter: {r.status_code} {r.text[:200]}")
+    txt = r.json()["choices"][0]["message"].get("content") or "{}"
+    try:
+        ans = json.loads(txt[txt.find("{"): txt.rfind("}") + 1])
+    except ValueError:
+        raise HTTPException(502, "модель вернула не JSON")
+    out = {"model": model, "answers": {k: ans.get(k, {"a": "unknown", "why": ""}) for k in JEV_QUESTIONS}}
+    NARR.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     return out
 
 

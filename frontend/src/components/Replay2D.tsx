@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
+import { activeAnchor, computeAnchors } from '../anchors'
 import { indexAt, num, str, hms } from '../api'
 import { useStore } from '../store'
 import { place, useT } from '../i18n'
 import { useCanvas } from './useCanvas'
 import { useDistance } from './Tram3D'
 
-const K = 5.2           // пикселей на метр
+let K = 5.2             // пикселей на метр, пересчитывается под ширину
 const SECS = [9.2, 8.6, 9.2]
 const GAP = 0.55
 const TRAM_LEN = SECS.reduce((a, b) => a + b, 0) + GAP * 2
@@ -21,6 +22,7 @@ export default function Replay2D() {
   const { win, cursor } = useStore()
   const { t, obj: objName, ctrl, lang } = useT()
   const dist = useDistance(win)
+  const anchors = useMemo(() => computeAnchors(win, dist), [win, dist])
   const { ref, size, ctx } = useCanvas()
 
   useEffect(() => {
@@ -32,8 +34,9 @@ export default function Replay2D() {
     const f = j > i ? Math.min(1, Math.max(0, (cursor - win.t[i]) / (win.t[j] - win.t[i]))) : 0
     const sp = Math.min(num(win, 'speed', i) ?? 0, 100)
     const pos = dist[i] + (dist[j] - dist[i]) * f
+    K = Math.max(8, Math.min(12, w / 90))
     const ground = h * 0.8
-    const front = 60 + TRAM_LEN * K
+    const front = Math.min(60 + TRAM_LEN * K, w * 0.55)
     const Y = (m: number) => ground - m * K // высота в метрах -> экран
 
     // небо и застройка (параллакс)
@@ -74,42 +77,42 @@ export default function Replay2D() {
       const x0 = front + dStop * K
       g.fillStyle = '#c8c3b8'; g.fillRect(x0, ground - 10, 30 * K, 10)
       g.fillStyle = '#3a4a55'; g.fillRect(x0 + 40, Y(2.6), 70, 5); g.fillRect(x0 + 44, Y(2.6), 4, 2.6 * K - 10); g.fillRect(x0 + 102, Y(2.6), 4, 2.6 * K - 10)
-      g.fillStyle = '#1d4f91'; rr(g, x0 + 40, Y(3.6), 150, 20, 3)
+      g.fillStyle = '#1d4f91'; rr(g, x0, ground + 10, 160, 20, 3)
       g.fillStyle = '#fff'; g.font = '600 12px Golos Text, sans-serif'
-      g.fillText(`${place(stopName, lang)} · ${dStop.toFixed(0)} ${lang === "ru" ? "м" : "m"}`.slice(0, 30), x0 + 46, Y(3.6) + 14)
+      g.fillText(`${place(stopName, lang)}, ${dStop.toFixed(0)} ${lang === "ru" ? "м" : "m"}`.slice(0, 30), x0 + 6, ground + 24)
     }
 
     // объект и светофор условно: по тормозному пути
     const near = (k: string) => [i - 1, i, i + 1].some((q) => q >= 0 && q < win.t.length && (num(win, k, q) ?? 0) > 0.5)
     const ob = str(win, 'goal_obj_type', i) ?? 'Unknown'
-    const dangerReal = near('danger_real'), dangerReq = near('danger_act')
+    const dangerReal = near('danger_real')
     const tlReal = near('tl_real'), tlReq = near('tl_act')
-    const dCond = Math.min(80, Math.max(12, (sp / 3.6) ** 2 / 2 + 8))
-    const xo = front + dCond * K
+    const aObj = activeAnchor(anchors.obj, i), aTl = activeAnchor(anchors.tl, i)
+    const xo = aObj ? front + (aObj.at - pos) * K : front + 20 * K
     if (dangerReal) {
       const gr = g.createLinearGradient(front, 0, xo, 0)
       gr.addColorStop(0, 'rgba(209,53,43,.45)'); gr.addColorStop(1, 'rgba(209,53,43,.08)')
       g.fillStyle = gr; g.fillRect(front, ground - 4, xo - front, 10)
     }
-    const showObj = ['Ped', 'Vehicle', 'Tram', 'Obstacle'].includes(ob) || dangerReal || dangerReq
+    const showObj = !!aObj && xo > front - 4
     if (showObj) {
-      g.save(); g.setLineDash([5, 4]); g.strokeStyle = '#d1352b'; g.lineWidth = 2
+      g.save(); g.setLineDash([5, 4]); g.strokeStyle = '#D55E00'; g.lineWidth = 2
       if (ob === 'Vehicle') {
         g.fillStyle = 'rgba(47,111,214,.85)'; rr(g, xo, Y(1.5), 4.3 * K, 1.1 * K, 6); rr(g, xo + 0.8 * K, Y(2.0), 2.4 * K, 0.7 * K, 6)
         g.fillStyle = '#222'; [xo + 0.9 * K, xo + 3.4 * K].forEach((cx) => { g.beginPath(); g.arc(cx, ground - 0.35 * K, 0.35 * K, 0, 7); g.fill() })
       } else if (ob === 'Tram') {
         g.fillStyle = 'rgba(109,44,145,.85)'; rr(g, xo, Y(3.3), 27 * K, 3 * K, 8)
       } else {
-        g.fillStyle = '#d1352b'; rr(g, xo - 6, Y(1.55), 12, 1.0 * K, 5)
+        g.fillStyle = '#D55E00'; rr(g, xo - 6, Y(1.55), 12, 1.0 * K, 5)
         g.fillRect(xo - 5, Y(0.6), 4, 0.6 * K); g.fillRect(xo + 1, Y(0.6), 4, 0.6 * K)
         g.fillStyle = '#f0c8a8'; g.beginPath(); g.arc(xo, Y(1.75), 0.2 * K, 0, 7); g.fill()
       }
       g.restore()
       g.fillStyle = '#8d2a1c'; g.font = '600 12px Golos Text, sans-serif'
-      g.fillText(`${objName(ob)}, ${t('schematic')}`, xo - 10, Y(4.2))
+      g.fillText(`${objName(ob)}, ${t('schematic')}`, xo - 10, Y(2.3) - 6)
     }
-    if (ob === 'TrafficLightSignal' || tlReq || tlReal) {
-      const xl = showObj ? xo + 70 : xo
+    if (aTl && front + (aTl.at - pos) * K > front - 4) {
+      const xl = front + (aTl.at - pos) * K + (showObj && Math.abs(aTl.at - (aObj?.at ?? -99)) < 8 ? 40 : 0)
       g.fillStyle = '#2a2f33'; g.fillRect(xl, Y(4), 4, 4 * K); rr(g, xl - 7, Y(5.3), 18, 1.4 * K, 3)
       ;['#ff3022', '#ffb020', '#2fd17a'].forEach((c, k) => {
         const on = (k === 0 && tlReal) || (k === 1 && tlReq && !tlReal)
@@ -180,21 +183,21 @@ export default function Replay2D() {
 
     // показания
     g.fillStyle = 'rgba(255,255,255,.88)'; rr(g, 12, 12, 220, 74, 8)
-    g.fillStyle = '#16222b'; g.font = '600 30px Unbounded, Golos Text, sans-serif'
+    g.fillStyle = '#17202B'; g.font = '600 30px Unbounded, Golos Text, sans-serif'
     g.fillText(sp.toFixed(1), 24, 50)
     const spW = g.measureText(sp.toFixed(1)).width
     g.font = '13px Golos Text, sans-serif'; g.fillStyle = '#5d6a72'
     g.fillText(t('kmh'), 30 + spW, 50)
     const gs = num(win, 'goal_speed', i)
     g.fillText(`${t('target')} ${gs == null ? t('noData') : gs.toFixed(0) + ' ' + t('kmh')} · ${ctrl(ctl)}`, 24, 72)
-    g.fillStyle = '#16222b'; g.font = '600 14px Golos Text, sans-serif'
+    g.fillStyle = '#17202B'; g.font = '600 14px Golos Text, sans-serif'
     g.fillText(hms(cursor), w - 84, 28)
     const warn = num(win, 'm_warn_level', i) ?? 0
     const tags: [string, string][] = []
-    if (warn > 0) tags.push([`${lang === 'ru' ? 'предупреждение' : 'warning'} ${warn.toFixed(0)}`, '#e3a21a'])
-    if (dangerReal) tags.push([lang === 'ru' ? 'торможение: препятствие' : 'braking: obstacle', '#d1352b'])
+    if (warn > 0) tags.push([`${lang === 'ru' ? 'предупреждение' : 'warning'} ${warn.toFixed(0)}`, '#B07A00'])
+    if (dangerReal) tags.push([lang === 'ru' ? 'торможение: препятствие' : 'braking: obstacle', '#D55E00'])
     if (tlReal) tags.push([lang === 'ru' ? 'торможение: светофор' : 'braking: signal', '#b07c0b'])
-    if (rail) tags.push([lang === 'ru' ? 'рельсовый тормоз' : 'rail brake', '#6d2c91'])
+    if (rail) tags.push([lang === 'ru' ? 'рельсовый тормоз' : 'rail brake', '#B4447F'])
     let tx = 246
     g.font = '600 12px Golos Text, sans-serif'
     for (const [txt, c] of tags) {

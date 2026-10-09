@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { Episode, EpisodeSummary, Kind, Series, Trip } from './api'
 import type { Lang } from './i18n'
 
-export type Page = 'overview' | 'episode' | 'upload'
+export type Page = 'overview' | 'episode' | 'upload' | 'guide'
 export type View = '3d' | '2d' | 'video'
 
 interface State {

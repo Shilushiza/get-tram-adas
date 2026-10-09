@@ -5,6 +5,9 @@ import { useT, type Key } from './i18n'
 import Overview from './pages/Overview'
 import Episode from './pages/Episode'
 import Upload from './pages/Upload'
+import Guide from './pages/Guide'
+import PhoneQR from './components/PhoneQR'
+import { openEpisode } from './nav'
 
 function Logo() {
   // силуэт трамвая с пантографом у контактного провода
@@ -27,6 +30,15 @@ export default function App() {
   const { t } = useT()
 
   useEffect(() => { api.trips().then((trips) => set({ trips })) }, [set])
+  // прямые ссылки: #ep=<id>, #upload, #en
+  useEffect(() => {
+    const h = decodeURIComponent(location.hash.slice(1))
+    if (h.includes('en')) set({ lang: 'en' })
+    const m = h.match(/ep=([^&]+)/)
+    if (m) openEpisode(m[1])
+    else if (h.includes('upload')) set({ page: 'upload' })
+    else if (h.includes('guide')) set({ page: 'guide' })
+  }, [set])
   useEffect(() => { document.documentElement.lang = lang }, [lang])
 
   // клавиатура для разбора: пробел, стрелки
@@ -45,7 +57,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const tabs: [Page, Key][] = [['overview', 'navOverview'], ['episode', 'navEpisode'], ['upload', 'navUpload']]
+  const tabs: [Page, Key][] = [['overview', 'navOverview'], ['episode', 'navEpisode'], ['upload', 'navUpload'], ['guide', 'navGuide']]
 
   return (
     <div className="app">
@@ -75,6 +87,7 @@ export default function App() {
             ))}
           </select>
         )}
+        <PhoneQR />
         <div className="lang" role="group" aria-label="Language">
           {(['ru', 'en'] as const).map((l) => (
             <button key={l} aria-pressed={lang === l} onClick={() => set({ lang: l })}>{l.toUpperCase()}</button>
@@ -85,6 +98,7 @@ export default function App() {
         {page === 'overview' && <Overview />}
         {page === 'episode' && <Episode />}
         {page === 'upload' && <Upload />}
+        {page === 'guide' && <Guide />}
       </main>
     </div>
   )
