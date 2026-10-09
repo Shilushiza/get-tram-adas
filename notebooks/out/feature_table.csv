@@ -1,0 +1,40 @@
+﻿уровень,признак,формула,смысл,поле-источник
+момент,speed,"speed, выбросы >100 -> ffill","текущая скорость, км/ч",speed
+момент,accel,Δspeed/3.6/5 с по сетке,"ускорение (отриц. = замедление), м/с²","speed, t"
+момент,jerk,Δaccel/5 с,"рывок, резкость торможения, м/с³","speed, t"
+момент,"speed_mean_{5,15,30}s",mean(speed) за окно,сглаженная скорость,speed
+момент,"speed_std_{15,30}s",std(speed) за окно,неравномерность хода (разгон-торможение),speed
+момент,"speed_drop_{15,30}s",max(speed за окно) - speed,насколько уже сбросили скорость,speed
+момент,accel_min_15s,min(accel) за 15 с,сильнейшее замедление за 15 с,speed
+момент,accel_mean_30s,mean(accel) за 30 с,тренд скорости,speed
+момент,goal_speed,goal_speed,целевая скорость от АБПВ,goal_speed (JSON)
+момент,"overspeed, overspeed_pos","speed - goal_speed, max(0, ·)",превышение целевой скорости,"speed, goal_speed"
+момент,"warn_level, warn_max_15s, warn_delta","m_warn_level, max за 15 с, разность",уровень предупреждения и его рост,m_warn_level
+момент,"obj_{Ped,Vehicle,Tram,TrafficLightSignal}, obj_na",one-hot,тип целевого объекта перед трамваем,goal_obj_type
+момент,"since_{danger,tl,sl,brake_mech,brake_rail,warn}","t - t(последнего фронта), потолок 3600 с",время с последнего срабатывания/торможения/предупреждения,"danger_real, tl_real, sl_real, brake_mech, brake_rail, m_warn_level"
+момент,"n_{danger,tl,sl,brake_mech,warn}_10min",число фронтов за 600 с,насыщенность обстановки,те же
+момент,"ctrl_auto, ctrl_und",controller == auto/und,кто управляет,controller
+момент,"since_ctrl_switch, n_ctrl_switch_5min","время с переключения, число переключений за 300 с",передача управления водитель-ассистент,controller
+момент,auto_share_5min,mean(ctrl_auto) за 300 с,насколько ассистент ведёт вагон,controller
+момент,"handle_driver, handle_assistant, handle_diff","позиции рукоятки, разность","тяга/торможение водителя и ассистента, их расхождение","handle_driver, handle_assistant"
+момент,"brake_mech, brake_mech_share_30s","флаг, доля времени за 30 с",механический тормоз,brake_mech
+момент,"dist_to_stop, near_stop_50m","м, dist<50","близость остановки (люди, подход к платформе)",dist_to_stop
+момент,"hour, hour_sin, hour_cos","час, sin/cos(2πh/24)","время суток (трафик, освещённость)",t
+момент,"danger_work, tl_work, sl_work, adas_on, danger_status_ok",флаги,какие подсистемы АБПВ включены и исправны,"*_work, adas_on, m_danger_obj_status"
+момент,m_speed_mode,значение,режим скорости автомата,m_speed_mode
+момент,"fsm_{Yield,Warn_Moving,Start_Moving,Moving}",one-hot,состояние автомата управления,fsm_state
+момент,"sensors_ok, sensors_missing, gps_ok",сумма флагов 7 датчиков,исправность датчиков,"ubloxGps, t25Front, leftImage, tramSlaveVisor, minsEth, odoFbTram, dbwFbTram"
+момент,"loc_converged, probability","флаг, 0..1",качество локализации,"loc_converged, probability"
+момент,is_safety_pedal_turned_on_fb,флаг,педаль безопасности нажата,is_safety_pedal_turned_on_fb
+эпизод,duration_s,end - start,"длительность воздействия, с","start, end"
+эпизод,"speed_start, speed_min, speed_end",скорость в начале/минимум/в конце,"с какой скорости и до какой тормозили, км/ч",speed
+эпизод,"speed_drop, speed_drop_rel","speed_start - speed_min, / speed_start",абсолютное и относительное падение скорости,speed
+эпизод,max_decel,"max(-dv/dt), обрезан 0..5","пиковое замедление, м/с²","speed, t"
+эпизод,"warn_max, has_warn","max(m_warn_level), >0",было ли предупреждение водителю,m_warn_level
+эпизод,"reaction_s_f, reaction_known","запрос/предупреждение -> применение, с",время реакции системы,"*_act, *_real, m_warn_level"
+эпизод,stopped_i,speed_end < 1,закончилось остановкой,speed
+эпизод,ctrl_auto,controller == auto,в эпизоде управлял ассистент,controller
+эпизод,n_kinds,число подсистем в эпизоде,сложность ситуации (несколько причин),danger/tl/sl_real
+эпизод,"n_hard, skid_i","число экстренных тормозов, юз",тяжёлые последствия,"brake_rail/crash/emergency, as_is_skid"
+эпизод,obj_ped_veh,"obj_type in {Ped, Vehicle}",уязвимый участник впереди,goal_obj_type
+эпизод,hour,час начала,время суток,t

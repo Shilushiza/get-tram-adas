@@ -1,0 +1,388 @@
+"""HTTP API для дашборда.
+
+Запуск: python -m uvicorn api:app --app-dir backend --port 8000
+"""
+import asyncio
+import json
+import os
+import sys
+import threading
+import time
+import uuid
+from functools import lru_cache
+from pathlib import Path
+
+import httpx
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from events import build_episode, score, segment  # noqa: E402
+from ingest import ingest_file  # noqa: E402
+from prepare import build, trip_summary  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+PROC = ROOT / "data" / "processed"
+TRIPS = PROC / "trips"
+NARR = PROC / "narratives"
+UPLOADS = ROOT / "data" / "uploads"
+VIDEOS = ROOT / "data" / "raw"
+
+SERIES = ["speed", "goal_speed", "handle_driver", "handle_assistant", "m_warn_level",
+          "brake_mech", "brake_rail", "brake_crash", "brake_emergency", "as_is_skid",
+          "danger_act", "danger_real", "tl_act", "tl_real", "sl_act", "sl_real",
+          "controller", "goal_obj_type", "fsm_state", "stop_name", "dist_to_stop", "route", "lat", "lon",
+          "t25Front", "leftImage", "tramSlaveVisor", "ubloxGps", "minsEth", "odoFbTram", "dbwFbTram"]
+
+
+def _env():
+    f = ROOT / ".env"
+    if f.exists():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                if v.strip():
+                    os.environ.setdefault(k.strip(), v.strip())
+
+
+_env()
+app = FastAPI(title="GET tram episodes")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+def _load_episodes():
+    """Сводки держим как dict, а факты как сжатые JSON-строки: так API занимает в разы меньше памяти."""
+    raw = json.loads((PROC / "episodes.json").read_text(encoding="utf-8"))
+    facts = {}
+    for e in raw:
+        facts[e["id"]] = json.dumps(e.pop("facts"), ensure_ascii=False)
+    return raw, facts
+
+
+EPISODES, FACTS = _load_episodes()
+TRIP_LIST: list[dict] = json.loads((PROC / "trips.json").read_text(encoding="utf-8"))
+BY_ID = {e["id"]: e for e in EPISODES}
+SUMMARY_KEYS = list(EPISODES[0]) if EPISODES else []
+LOCK = threading.Lock()
+
+
+@lru_cache(maxsize=4)
+def trip_df(trip: str) -> pd.DataFrame:
+    p = TRIPS / f"{trip}.parquet"
+    if not p.exists():
+        p = UPLOADS / f"{trip}.parquet"
+    if not p.exists():
+        raise HTTPException(404, "нет такой поездки")
+    df = pd.read_parquet(p)
+    return df[[c for c in ["t", *SERIES] if c in df]]
+
+
+def _records(df: pd.DataFrame) -> dict:
+    """Колоночный JSON: {t: [ms...], speed: [...], ...}; NaN -> null."""
+    out = {"t": ((df["t"] - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(milliseconds=1)).tolist()}
+    for c in df.columns:
+        if c == "t":
+            continue
+        s = df[c]
+        if pd.api.types.is_numeric_dtype(s) or s.dtype == bool:
+            out[c] = [None if (v is None or (isinstance(v, float) and np.isnan(v))) else round(float(v), 3) for v in s.tolist()]
+        else:
+            out[c] = [None if (v is None or str(v) == "nan") else str(v) for v in s.astype(object).tolist()]
+    return out
+
+
+@app.get("/api/trips")
+def trips():
+    return TRIP_LIST
+
+
+@app.get("/api/episodes")
+def episodes(trip: str | None = None, kind: str | None = None, min_severity: int = 0, limit: int = 20000):
+    out = []
+    for e in EPISODES:
+        if trip and trip != "all" and e["trip"] != trip:
+            continue
+        if kind and e["kind"] not in kind.split(","):
+            continue
+        if e["severity"] < min_severity:
+            continue
+        out.append({k: e.get(k) for k in SUMMARY_KEYS})
+        if len(out) >= limit:
+            break
+    return out
+
+
+@app.get("/api/episodes/{eid}")
+def episode(eid: str, lang: str = "ru"):
+    e = BY_ID.get(eid.replace("~", "#"))
+    if not e:
+        raise HTTPException(404, "нет такого эпизода")
+    return {**e, "facts": json.loads(FACTS[e["id"]]), "narrative": _cached_narrative(e["id"], lang)}
+
+
+@app.get("/api/series")
+def series(trip: str, start: str | None = None, end: str | None = None, max_points: int = 4000):
+    df = trip_df(trip)
+    if start:
+        df = df[df.t >= pd.Timestamp(start)]
+    if end:
+        df = df[df.t <= pd.Timestamp(end)]
+    if len(df) > max_points:  # прореживание, но точки срабатываний сохраняем
+        keep = np.zeros(len(df), bool)
+        keep[:: int(np.ceil(len(df) / max_points))] = True
+        for c in ["danger_real", "tl_real", "brake_rail", "brake_crash", "brake_emergency"]:
+            if c in df:
+                keep |= (df[c].fillna(0) > 0).to_numpy()
+        df = df[keep]
+    return _records(df)
+
+
+# ---------- агрегаты для дашборда ----------
+
+@app.get("/api/stats")
+def stats(trip: str = "all", kinds: str = "danger,traffic_light,hard_brake,skid,speed_limit"):
+    ks = set(kinds.split(","))
+    d = pd.DataFrame([{k: e.get(k) for k in SUMMARY_KEYS} for e in EPISODES
+                      if (trip == "all" or e["trip"] == trip)])
+    tl = [t for t in TRIP_LIST if trip == "all" or t["trip"] == trip]
+    km = sum(t["km"] for t in tl)
+    if d.empty:
+        return {"total": 0, "km": km}
+    d_all = d
+    d = d[d.kind.isin(ks)]
+    t = pd.to_datetime(d.start, utc=True).dt.tz_convert("Europe/Moscow")
+    hours = pd.crosstab(t.dt.hour, d.kind).reindex(range(24), fill_value=0)
+    by_wagon = d.groupby("wagon").size()
+    km_wagon = pd.Series({w: sum(x["km"] for x in tl if x["wagon"] == w) for w in by_wagon.index})
+    sp_bins = list(range(0, 75, 5))
+    speed_hist = pd.cut(d.speed_start.clip(0, 70), bins=sp_bins, include_lowest=True).value_counts().sort_index()
+    stops = d[d.stop.astype(bool)].groupby("stop").agg(n=("id", "size"), crit=("severity", lambda s: int((s >= 2).sum())))
+    stops = stops.sort_values("n", ascending=False).head(12)
+    pts = d.dropna(subset=["lat", "lon"])
+    pts = pts[(pts.lat > 59) & (pts.lat < 61)]
+    if len(pts) > 2500:
+        pts = pts.sample(2500, random_state=0, weights=pts.severity + 1)
+    days = pd.crosstab(t.dt.strftime("%Y-%m-%d"), d.kind)
+    top = d.sort_values(["severity", "anomaly"], ascending=False).head(40)
+    return {
+        "total": int(len(d)), "total_all": int(len(d_all)), "km": round(km, 1), "trips": len(tl),
+        "wagons": sorted(d_all.wagon.unique().tolist()),
+        "critical": int((d.severity >= 2).sum()),
+        "per100km": round(len(d) / km * 100, 1) if km else None,
+        "assist_share": round(float((d.controller == "auto").mean()), 3) if len(d) else 0,
+        "stopped_share": round(float(d.stopped.mean()), 3) if len(d) else 0,
+        "median_decel": round(float(d.max_decel.median()), 2) if len(d) else 0,
+        "by_kind": d.kind.value_counts().to_dict(),
+        "by_obj": d[d.obj_type != "Unknown"].obj_type.value_counts().to_dict(),
+        "obj_unknown": int((d.obj_type == "Unknown").sum()),
+        "by_controller": d.controller.value_counts().to_dict(),
+        "by_severity": d.severity.value_counts().sort_index().to_dict(),
+        "hours": {"hour": list(range(24)), **{k: hours[k].tolist() for k in hours.columns}},
+        "wagons_rate": [{"wagon": w, "n": int(n), "km": round(float(km_wagon[w]), 1),
+                         "per100": round(n / km_wagon[w] * 100, 1) if km_wagon[w] else None} for w, n in by_wagon.items()],
+        "speed_hist": {"bins": [f"{int(i.left) if i.left > 0 else 0}-{int(i.right)}" for i in speed_hist.index],
+                       "n": speed_hist.tolist()},
+        "decel": d.max_decel.clip(0, 3).round(1).value_counts().sort_index().to_dict(),
+        "stops": [{"stop": s, "n": int(r.n), "crit": int(r.crit)} for s, r in stops.iterrows()],
+        "points": pts[["lat", "lon", "kind", "severity", "id"]].values.tolist(),
+        "days": {"day": days.index.tolist(), **{k: days[k].tolist() for k in days.columns}},
+        "top": top[["id", "kind", "start", "obj_type", "speed_start", "speed_min", "max_decel", "severity", "stop", "wagon"]]
+        .to_dict("records"),
+    }
+
+
+# ---------- видео с камер ----------
+
+@app.get("/api/videos")
+def videos():
+    out = []
+    for f in sorted(VIDEOS.glob("*.mp4")):
+        out.append({"name": f.name, "size_mb": round(f.stat().st_size / 1e6, 1), "url": f"/api/videos/{f.name}"})
+    return out
+
+
+@app.get("/api/videos/{name}")
+def video(name: str):
+    f = (VIDEOS / name).resolve()
+    if f.parent != VIDEOS.resolve() or not f.exists() or f.suffix != ".mp4":
+        raise HTTPException(404)
+    return FileResponse(f, media_type="video/mp4")
+
+
+# ---------- загрузка своих данных с разбором в реальном времени ----------
+
+JOBS: dict[str, dict] = {}
+
+
+def _run_job(job_id: str, csv: Path, js: Path | None):
+    job = JOBS[job_id]
+    ev = job["events"]
+    try:
+        trip = f"upload-{job_id[:6]}_{csv.stem[:20]}"
+        ev.append({"type": "stage", "stage": "parse_json" if js else "parse_csv", "t": time.time()})
+        json_df = None
+        if js:
+            json_df = ingest_file(js, {})
+            ev.append({"type": "progress", "stage": "parse_json", "rows": len(json_df)})
+        ev.append({"type": "stage", "stage": "merge"})
+        df = build(csv, json_df=json_df, trip=trip)
+        df = df.sort_values("t", kind="stable").reset_index(drop=True)
+        df.to_parquet(UPLOADS / f"{trip}.parquet", index=False)
+        ev.append({"type": "progress", "stage": "merge", "rows": len(df),
+                   "start": df.t.min().isoformat(), "end": df.t.max().isoformat()})
+        groups = segment(df)
+        ev.append({"type": "stage", "stage": "detect", "total": len(groups)})
+        eps = []
+        for n, (s, e) in enumerate(groups, 1):
+            from dataclasses import asdict
+            ep = asdict(build_episode(df, s, e, n))
+            eps.append(ep)
+            ev.append({"type": "episode", "i": n, "total": len(groups),
+                       "episode": {k: ep.get(k) for k in SUMMARY_KEYS if k not in ("anomaly", "facts")}})
+            time.sleep(0.004)  # чтобы поток событий был виден глазом на маленьких файлах
+        eps = score(eps)
+        summ = trip_summary(df, eps)
+        with LOCK:
+            for ep in eps:
+                FACTS[ep["id"]] = json.dumps(ep.pop("facts"), ensure_ascii=False)
+                EPISODES.append(ep)
+                BY_ID[ep["id"]] = ep
+            TRIP_LIST.append(summ)
+        ev.append({"type": "done", "trip": trip, "summary": summ})
+    except Exception as ex:  # noqa: BLE001
+        ev.append({"type": "error", "message": f"{type(ex).__name__}: {ex}"})
+    finally:
+        job["finished"] = True
+
+
+@app.post("/api/upload")
+async def upload(files: list[UploadFile] = File(...)):
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    job_id = uuid.uuid4().hex
+    folder = UPLOADS / job_id
+    folder.mkdir()
+    csv = js = None
+    for f in files:
+        name = Path(f.filename or "file").name
+        dest = folder / name
+        with open(dest, "wb") as out:
+            while chunk := await f.read(1 << 20):
+                out.write(chunk)
+        if name.lower().endswith(".csv"):
+            csv = dest
+        elif name.lower().endswith((".jsonseq", ".json")):
+            js = dest
+    if csv is None:
+        raise HTTPException(400, "Нужен CSV-файл move_detailed_*.csv (JSON-файл можно добавить к нему)")
+    JOBS[job_id] = {"events": [], "finished": False}
+    threading.Thread(target=_run_job, args=(job_id, csv, js), daemon=True).start()
+    return {"job": job_id}
+
+
+@app.get("/api/jobs/{job_id}/stream")
+async def job_stream(job_id: str):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404)
+
+    async def gen():
+        i = 0
+        while True:
+            evs = job["events"]
+            while i < len(evs):
+                yield f"data: {json.dumps(evs[i], ensure_ascii=False)}\n\n"
+                i += 1
+            if job["finished"] and i >= len(job["events"]):
+                break
+            await asyncio.sleep(0.05)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+# ---------- ИИ-разбор через OpenRouter ----------
+
+PROMPTS = {
+    "ru": """Ты аналитик системы помощи водителю трамвая. Ниже проверенные факты эпизода из бортовых данных,
+сгруппированные по разделам; у каждого факта есть время и поле-источник.
+Напиши связный разбор на русском из четырёх абзацев с заголовками:
+«Обстоятельства и известная причина», «Реакция системы», «Наблюдаемый результат», «Ограничения анализа».
+Правила: каждое утверждение с временной меткой ЧЧ:ММ:СС; используй ТОЛЬКО приведённые факты;
+не придумывай объекты, типы тормозов, расстояния и действия водителя; если причина не подтверждена полем,
+прямо напиши, что причина не установлена. Поле goal_obj_type показывает объект, по которому система
+задавала скорость: это подтверждённое обстоятельство, называй его так, но не утверждай, что объект был в опасной близости.
+Ссылки на поля пиши в скобках. Без длинных тире, без markdown-разметки кроме заголовков абзацев.
+
+Эпизод {id}, вагон {wagon}, тип: {kind}.
+{facts}""",
+    "en": """You are an analyst of a tram driver-assistance system. Below are verified facts of one episode from onboard data,
+grouped by section; each fact has a time and a source field.
+Write a coherent review in English with four paragraphs and headings:
+"Circumstances and known cause", "System response", "Observed outcome", "Limits of the analysis".
+Rules: every statement carries an HH:MM:SS timestamp; use ONLY the given facts; do not invent objects, brake types,
+distances or driver actions; if no field confirms the cause, say the cause is not established. The goal_obj_type field
+is the object the system used to set the target speed: state it as such, do not claim it was dangerously close.
+Put field references in parentheses. No em dashes, no markdown except paragraph headings.
+
+Episode {id}, wagon {wagon}, type: {kind}.
+{facts}""",
+}
+SEC = {"ru": {"circumstances": "Обстоятельства", "reaction": "Реакция", "result": "Результат", "limits": "Ограничения"},
+       "en": {"circumstances": "Circumstances", "reaction": "Response", "result": "Outcome", "limits": "Limits"}}
+DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+
+
+def _narr_path(eid: str, lang: str) -> Path:
+    return NARR / (eid.replace("#", "~") + ("" if lang == "ru" else f".{lang}") + ".json")
+
+
+def _cached_narrative(eid: str, lang: str = "ru"):
+    f = _narr_path(eid, lang)
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
+
+
+@app.get("/api/llm")
+def llm_status():
+    return {"enabled": bool(os.environ.get("OPENROUTER_API_KEY")), "model": os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)}
+
+
+@app.post("/api/episodes/{eid}/narrative")
+def narrative(eid: str, force: bool = False, lang: str = "ru"):
+    lang = "en" if lang == "en" else "ru"
+    e = BY_ID.get(eid.replace("~", "#"))
+    if not e:
+        raise HTTPException(404, "нет такого эпизода")
+    if not force and (c := _cached_narrative(e["id"], lang)):
+        return c
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise HTTPException(400, "OPENROUTER_API_KEY не задан в .env")
+    model = os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
+    txt = "text_en" if lang == "en" else "text"
+    facts = "\n".join(f"[{SEC[lang][f['section']]}] {f['t'][11:19]} {f.get(txt) or f['text']} (field: {f['field']})"
+                      for f in json.loads(FACTS[e["id"]]))
+    r = httpx.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {key}", "X-Title": "GET tram episode analyzer"},
+        json={"model": model, "temperature": 0.1, "max_tokens": 3000, "reasoning": {"enabled": False},
+              "messages": [{"role": "user", "content": PROMPTS[lang].format(id=e["id"], wagon=e["wagon"], kind=e["kind"], facts=facts)}]},
+        timeout=120,
+    )
+    if r.status_code != 200:
+        raise HTTPException(502, f"OpenRouter: {r.status_code} {r.text[:300]}")
+    msg = r.json()["choices"][0]
+    text = msg["message"].get("content")
+    if not text:
+        raise HTTPException(502, f"OpenRouter вернул пустой ответ (finish_reason={msg.get('finish_reason')})")
+    out = {"model": model, "text": text.replace("—", "-").replace("–", "-")}
+    NARR.mkdir(parents=True, exist_ok=True)
+    _narr_path(e["id"], lang).write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+# ---------- собранный фронтенд (для публичного адреса: один сервер на всё) ----------
+DIST = ROOT / "frontend" / "dist"
+if DIST.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=DIST, html=True), name="web")

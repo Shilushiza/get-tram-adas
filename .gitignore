@@ -1,0 +1,10 @@
+.env
+data/
+logs/
+__pycache__/
+.pytest_cache/
+node_modules/
+frontend/dist/
+notebooks/.venv/
+notebooks/data_colab/
+.claude/launch.json
