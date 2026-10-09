@@ -14,3 +14,7 @@ pitch/build/
 pitch/build_sirius/
 frontend/public/__edge.js
 frontend/public/_logo_preview.html
+pitch/template/
+pitch/references/
+notebooks/data_for_colab.zip
+notebooks/out/*.parquet
