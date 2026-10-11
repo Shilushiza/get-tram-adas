@@ -44,7 +44,7 @@ function Start-Servers {
     if (-not (Test-Url $WebUrl)) {
         $vite = Join-Path $Root 'frontend\node_modules\vite\bin\vite.js'
         $script:Procs += Start-Process node -PassThru -WindowStyle Hidden -WorkingDirectory (Join-Path $Root 'frontend') `
-            -ArgumentList "`"$vite`"", '--host', '127.0.0.1', '--port', '5173', '--strictPort' `
+            -ArgumentList "`"$vite`"", '--host', '0.0.0.0', '--port', '5173', '--strictPort' `
             -RedirectStandardOutput "$Logs\web.log" -RedirectStandardError "$Logs\web.err.log"
     }
 }

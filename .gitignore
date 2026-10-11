@@ -18,3 +18,5 @@ pitch/template/
 pitch/references/
 notebooks/data_for_colab.zip
 notebooks/out/*.parquet
+tools/
+pitch/site_url.txt

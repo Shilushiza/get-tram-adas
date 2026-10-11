@@ -250,7 +250,7 @@ export default function Episode() {
               <i style={{ background: 'rgba(11,46,122,.45)' }} />{t('lampDanger')}
               <i style={{ background: 'rgba(47,127,224,.45)' }} />{t('lampTl')}
               <i style={{ background: 'rgba(168,188,212,.35)' }} />{t('lampSl')}
-              <i style={{ background: 'rgba(106,63,208,.45)' }} />{t('lampRail')}
+              <i style={{ background: 'rgba(106,63,208,.85)', height: 4 }} />{lang === 'ru' ? 'тормоз (полоска снизу)' : 'brake (strip at the bottom)'}
             </div>
           </section>
         </div>

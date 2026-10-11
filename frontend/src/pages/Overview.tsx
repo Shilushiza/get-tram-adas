@@ -1,3 +1,4 @@
+import { SiteQR } from '../components/PhoneQR'
 import './map.css'
 import VideoPanel from '../components/VideoPanel'
 import { useEffect, useState, type ReactNode } from 'react'
@@ -124,6 +125,7 @@ export default function Overview() {
             <button className="btn primary" disabled={!s?.top.length} onClick={() => s?.top[0] && openEpisode(s.top[0].id)}>{t('ctaFirst')}</button>
             <button className="btn" onClick={() => set({ page: 'upload' })}>{t('dsUpload')}</button>
           </div>
+          <SiteQR />
         </div>
       </section>
 

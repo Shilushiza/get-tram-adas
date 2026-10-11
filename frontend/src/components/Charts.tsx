@@ -4,7 +4,8 @@ import { useStore } from '../store'
 import { useT } from '../i18n'
 import type { Series } from '../api'
 
-// заливка, когда воздействие применено: верхняя половина для подсистем, нижняя для тормозов
+// подсистемы (ограничение, светофор, препятствие) заливают всю высоту; тормоза отдельной плотной полоской внизу,
+// чтобы половина графика не выглядела «непрогруженной»
 // цвета те же, что у типов срабатываний (KIND_COLOR): препятствие киноварь, светофор янтарь, тормоза пурпур
 export const BANDS: [string, string, number][] = [
   ['sl_real', 'rgba(168,188,212,.18)', 0], ['tl_real', 'rgba(47,127,224,.24)', 0], ['danger_real', 'rgba(11,46,122,.24)', 0],
@@ -21,12 +22,15 @@ function bandsPlugin(get: () => Series | null): uPlot.Plugin {
         for (const [key, color, lane] of BANDS) {
           const v = s[key] as (number | null)[] | undefined
           if (!v) continue
-          ctx.fillStyle = color
+          // тормоза: плотная полоска 10 px у нижней оси, цвет без прозрачности
+          ctx.fillStyle = lane ? color.replace(/,\s*[\d.]+\)$/, ',.85)') : color
+          const stripH = 10 * devicePixelRatio
           for (let i = 0; i < s.t.length; i++) {
             if ((v[i] ?? 0) < 0.5) continue
             const x0 = u.valToPos(s.t[i], 'x', true)
             const x1 = u.valToPos(s.t[Math.min(i + 1, s.t.length - 1)], 'x', true)
-            ctx.fillRect(x0, bbox.top + lane * bbox.height * 0.5, Math.max(x1 - x0, 2), bbox.height * 0.5)
+            if (lane) ctx.fillRect(x0, bbox.top + bbox.height - stripH, Math.max(x1 - x0, 2), stripH)
+            else ctx.fillRect(x0, bbox.top, Math.max(x1 - x0, 2), bbox.height)
           }
         }
       },
@@ -92,7 +96,7 @@ export default function Charts() {
       ...common(200),
       series: [
         { label: lang === 'ru' ? 'Время' : 'Time', value: timeVal },
-        { label: `${t('sSpeed')}, ${t('kmh')}`, stroke: '#17202B', width: 2.2, fill: 'rgba(23,32,43,.05)', points: { show: false }, value: (_u, v) => fmt(1)(v) },
+        { label: `${t('sSpeed')}, ${t('kmh')}`, stroke: '#17202B', width: 2.2, points: { show: false }, value: (_u, v) => fmt(1)(v) },
         { label: `${t('sGoal')}, ${t('kmh')}`, stroke: '#0072B2', width: 1.6, dash: [6, 4], points: { show: false }, value: (_u, v) => fmt(0)(v) },
       ],
       scales: { y: { range: (_u, _mn, mx) => [0, Math.max(20, Math.min(mx ?? 0, 90) + 5)] } },

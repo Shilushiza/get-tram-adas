@@ -205,7 +205,11 @@ def lan(port: int = 8000):
         pass
     rank = lambda ip: (0 if ip.startswith("192.168.") else 1 if ip.startswith("10.") else 2, ip)
     ips = sorted((ip for ip in ips if not ip.startswith("127.")), key=rank)
-    return {"urls": [f"http://{ip}:{port}/" for ip in ips], "public": os.environ.get("PUBLIC_URL")}
+    public = os.environ.get("PUBLIC_URL")
+    site_file = ROOT / "pitch" / "site_url.txt"   # тот же адрес туннеля, что в QR презентации
+    if not public and site_file.exists():
+        public = site_file.read_text(encoding="utf-8").strip() or None
+    return {"urls": [f"http://{ip}:{port}/" for ip in ips], "public": public}
 
 
 # ---------- видео с камер ----------
