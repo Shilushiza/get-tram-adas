@@ -397,9 +397,17 @@ def _cached_narrative(eid: str, lang: str = "ru"):
     return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
 
 
+def _live_key():
+    """Ключ OpenRouter, только если живые вызовы явно включены (LLM_LIVE=1). По умолчанию сайт
+    в OpenRouter не ходит и показывает только сохранённые ответы из data/processed/narratives/."""
+    if os.environ.get("LLM_LIVE") != "1":
+        return None
+    return os.environ.get("OPENROUTER_API_KEY")
+
+
 @app.get("/api/llm")
 def llm_status():
-    return {"enabled": bool(os.environ.get("OPENROUTER_API_KEY")), "model": os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)}
+    return {"enabled": bool(_live_key()), "model": os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)}
 
 
 @app.post("/api/episodes/{eid}/narrative")
@@ -408,11 +416,12 @@ def narrative(eid: str, force: bool = False, lang: str = "ru"):
     e = BY_ID.get(eid.replace("~", "#"))
     if not e:
         raise HTTPException(404, "нет такого эпизода")
-    if not force and (c := _cached_narrative(e["id"], lang)):
-        return c
-    key = os.environ.get("OPENROUTER_API_KEY")
+    cached = _cached_narrative(e["id"], lang)
+    key = _live_key()
+    if cached and (not force or not key):
+        return cached
     if not key:
-        raise HTTPException(400, "OPENROUTER_API_KEY не задан в .env")
+        raise HTTPException(503, "ИИ-вызовы выключены: показываются только сохранённые ответы")
     model = os.environ.get("OPENROUTER_MODEL", DEFAULT_MODEL)
     txt = "text_en" if lang == "en" else "text"
     facts = "\n".join(f"[{SEC[lang][f['section']]}] {f['t'][11:19]} {f.get(txt) or f['text']} (field: {f['field']})"
@@ -477,11 +486,9 @@ def jev(eid: str, run: bool = False):
     f = NARR / (e["id"].replace("#", "~") + f".jev.{PROMPT_VERSION}.json")
     if f.exists():
         return json.loads(f.read_text(encoding="utf-8"))
-    if not run:
+    key = _live_key()
+    if not run or not key:
         return {"model": None, "answers": None}
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if not key:
-        raise HTTPException(400, "OPENROUTER_API_KEY не задан")
     model = os.environ.get("JEV_MODEL", "qwen/qwen3.8-flash")
     facts = "\n".join(f"{x['t'][11:19]} {x['text']}" for x in json.loads(FACTS[e["id"]]))
     prompt = JEV_PROMPT.format(**JEV_QUESTIONS, kind=e["kind"], v0=e["speed_start"], v1=e["speed_min"], dec=e["max_decel"],

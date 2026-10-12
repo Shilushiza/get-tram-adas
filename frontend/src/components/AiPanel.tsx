@@ -94,6 +94,7 @@ function JevBlock() {
         </dl>
       )}
       {!has && busy && <p className="hint"><span className="spinner dark" /> {lang === 'ru' ? 'Jev читает факты эпизода…' : 'Jev is reading the facts…'}</p>}
+      {!has && !busy && !err && <p className="hint">{lang === 'ru' ? 'Сохранённого ответа Jev для этого эпизода нет. Живые вызовы ИИ выключены.' : 'No saved Jev answer for this episode. Live AI calls are off.'}</p>}
       {!has && !busy && err && (
         <button className="btn primary" onClick={() => ask(true)}>{lang === 'ru' ? 'Спросить Jev ещё раз' : 'Ask Jev again'}</button>
       )}
@@ -110,6 +111,8 @@ function ReviewBlock() {
   const [model, setModel] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [live, setLive] = useState(false)
+  useEffect(() => { api.llm().then((d) => setLive(d.enabled)).catch(() => setLive(false)) }, [])
   useEffect(() => {
     setErr(null); setText(null)
     if (!selected) return
@@ -138,10 +141,12 @@ function ReviewBlock() {
           ))}
           <small className="ai-model">{t('aiModel')} {model}</small>
         </div>
-      ) : <p className="hint">{t('aiHint')}</p>}
-      <button className="btn" disabled={busy} onClick={run}>
-        {busy ? <span className="spinner dark" /> : null}{busy ? t('aiBusy') : text ? t('aiRerun') : t('aiRun')}
-      </button>
+      ) : <p className="hint">{live ? t('aiHint') : (lang === 'ru' ? 'Сохранённого разбора для этого эпизода нет. Живые вызовы ИИ выключены.' : 'No saved review for this episode. Live AI calls are off.')}</p>}
+      {live && (
+        <button className="btn" disabled={busy} onClick={run}>
+          {busy ? <span className="spinner dark" /> : null}{busy ? t('aiBusy') : text ? t('aiRerun') : t('aiRun')}
+        </button>
+      )}
       {err && <p className="ai-err" role="alert">{llmError(err, lang)}</p>}
     </section>
   )
